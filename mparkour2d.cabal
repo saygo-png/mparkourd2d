@@ -1,0 +1,39 @@
+cabal-version: 2.4
+name:          mparkour2d
+version:       0
+build-type:    Simple
+author:        saygo-png
+maintainer:    saygo-png <saygo.mail@proton.me>
+
+common common-options
+  build-depends:      base, h-raylib
+  default-language:   GHC2024
+  ghc-options:
+    -Weverything
+    -Wno-all-missed-specialisations
+    -Wno-missed-specialisations
+    -Wno-missing-exported-signatures
+    -Wno-missing-import-lists
+    -Wno-missing-kind-signatures
+    -Wno-missing-local-signatures
+    -Wno-missing-safe-haskell-mode
+    -Wno-safe
+    -Wno-unsafe
+    -Wno-unticked-promoted-constructors
+    -rtsopts
+    -threaded
+    -with-rtsopts=-N
+
+  default-extensions:
+    DuplicateRecordFields
+    MultiWayIf
+    NoFieldSelectors
+    NoImplicitPrelude
+    OverloadedRecordDot
+    OverloadedStrings
+    PartialTypeSignatures
+
+executable mparkour2d
+  import:         common-options
+  hs-source-dirs: src
+  main-is:        Main.hs
