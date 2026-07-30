@@ -6,7 +6,7 @@ author:        saygo-png
 maintainer:    saygo-png <saygo.mail@proton.me>
 
 common common-options
-  build-depends:      relude, base, h-raylib, linear
+  build-depends:      relude, h-raylib, linear, lens
   default-language:   GHC2024
   ghc-options:
     -Weverything
