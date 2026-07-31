@@ -32,32 +32,47 @@ data World = World
   { _worldPlayer :: Player
   , _worldWindowResources :: WindowResources
   , _worldGaTargets :: [GaTarget]
+  , _worldGaActive :: Bool
+  , _worldSelectedGaTarget :: Maybe (V2 Float)
   }
 
 data Action
   = MoveLeft
   | MoveRight
   | Jump
+  | GaStart
+  | GaStop
   deriving stock (Eq, Show, Enum, Bounded)
+
+-- | How an action's key should be sampled each frame.
+data Trigger = OnDown | OnPressed | OnReleased
 
 $(makeFields ''Player)
 $(makeFields ''GaTarget)
 $(makeFields ''World)
 
 windowWidth, windowHeight :: Int
-windowWidth = 700
-windowHeight = 700
+windowWidth = 1920
+windowHeight = 1080
 
 friction, gravity, playerHeight, gaLockonRange :: Float
 friction = 0.999
 gravity = 2
 playerHeight = 80
-gaLockonRange = 200
+gaLockonRange = 120
 
-keyBinding :: Action -> KeyboardKey
-keyBinding MoveLeft = KeyA
-keyBinding MoveRight = KeyD
-keyBinding Jump = KeySpace
+checkAction :: Action -> IO Bool
+checkAction a = case keyBinding a of
+  (key, OnDown) -> isKeyDown key
+  (key, OnPressed) -> isKeyPressed key
+  (key, OnReleased) -> isKeyReleased key
+  where
+    keyBinding :: Action -> (KeyboardKey, Trigger)
+    keyBinding MoveLeft = (KeyA, OnDown)
+    keyBinding MoveRight = (KeyD, OnDown)
+    keyBinding Jump = (KeySpace, OnDown)
+    keyBinding GaStart = (KeyLeftShift, OnPressed)
+    keyBinding GaStop = (KeyLeftShift, OnReleased)
 
 applyAction :: Action -> State World ()
 applyAction MoveLeft = player . velocity . _x -= 10
@@ -65,6 +80,8 @@ applyAction MoveRight = player . velocity . _x += 10
 applyAction Jump = do
   grounded <- gets isOnGround
   if grounded then player . velocity . _y += 400 else pass
+applyAction GaStart = gaActive .= True
+applyAction GaStop = gaActive .= False
 
 applyVelocity :: Float -> State World ()
 applyVelocity dt = do
@@ -75,6 +92,14 @@ applyVelocity dt = do
 applyGravity :: Float -> State World ()
 applyGravity dt = player . velocity . _y -= (gravity * 1000 * dt)
 
+applyGA :: Float -> State World ()
+applyGA dt = do
+  ppos <- use (player . position)
+  gaActive' <- use gaActive
+  mTarget <- use selectedGaTarget
+  whenJust (mTarget <* guard gaActive') $ \target ->
+    player . velocity += (5000 * dt) *^ normalize (target - ppos)
+
 groundCollision :: State World ()
 groundCollision = do
   y <- use (player . position . _y)
@@ -84,10 +109,7 @@ groundCollision = do
 
 -- | Flip the y coordinate for raylib. I like -y = down.
 toScreenWorld :: World -> World
-toScreenWorld w =
-  w
-    & player . position %~ toScreen
-    & gaTargets . traverse . position %~ toScreen
+toScreenWorld = player . position %~ toScreen >>> gaTargets . traverse . position %~ toScreen
   where
     toScreen (V2 x y) = V2 x (-y)
 
@@ -100,21 +122,24 @@ inRange range p1 p2 = qd p1 p2 <= range ** 2
 startup :: IO World
 startup = do
   window <- initWindow windowWidth windowHeight "raylib [core] example - basic window"
-  let gaTargets' = map (`V2` 300) [-2000, -1800 ..] & take 50 & map (GaTarget True)
+  let spacing :: Float = 400
+      coord n start = map ((start +) . (* spacing)) [0 .. n - 1]
+      gaTargets' = liftA2 V2 (coord 8 (-2000)) (coord 50 300) & map (GaTarget True)
 
   setTargetFPS 144
-  return $ World (Player (V2 0 0) (V2 0 300)) window gaTargets'
+  return $ World (Player (V2 0 0) (V2 0 300)) window gaTargets' False Nothing
 
 mainLoop :: World -> IO World
 mainLoop world = do
   showCursor
-  pressedActions <- filterM (isKeyDown . keyBinding) universe
+  pressedActions <- filterM checkAction universe
   mousePosition <- getMousePosition
   dt <- getFrameTime
 
   let newWorld = flip execState world $ do
         applyGravity dt
         traverse_ applyAction pressedActions
+        applyGA dt
         applyVelocity dt
         groundCollision
 
@@ -131,22 +156,31 @@ mainLoop world = do
 
       drawGround = drawLineEx (V2 (-999) 0) (V2 999 0) 4 black
 
-      targetsInRange = filter (\t -> inRange gaLockonRange mousePosition (t ^. position & worldToScreen)) (rWorld ^. gaTargets)
+      targetInRange =
+        newWorld ^. gaTargets
+          & filter (inRange gaLockonRange mousePosition . screenPosition)
+          & sortOn (distance mousePosition . screenPosition)
+          & nonEmpty
+          <&> head
+        where
+          screenPosition = worldToScreen . view position
 
   drawing $ do
     clearBackground gray
     drawCircleV mousePosition gaLockonRange pink
-    -- traverse_ (\t -> drawLineV mousePosition (t ^. position & worldToScreen) darkBrown) targetsInRange
+    drawText ("Player height: " <> show (round $ ppos ^. _y :: Int)) 20 20 20 black
+    when (rWorld ^. gaActive) (drawText "GA active" 20 50 20 black)
     mode2D mainCam $ do
       drawRectangle 0 0 200 200 red
       drawRectangle (div windowWidth 2) (div windowHeight 2) 200 200 black
       traverse_ (\gaTarget -> drawCircleV (gaTarget ^. position) 10 brown) (rWorld ^. gaTargets)
-      traverse_ (\t -> drawLineEx (screenToWorld mousePosition) (t ^. position) 4 darkBrown) targetsInRange
+      traverse_ (\t -> drawLineEx (screenToWorld mousePosition) (t ^. position) 4 darkBrown) targetInRange
       drawGround
       drawPlayerSprite
       drawText "Basic raylib window" 30 40 18 black
 
-  return newWorld
+  pure . flip execState newWorld $ do
+    selectedGaTarget .= (targetInRange <&> (view position >>> _y %~ negate))
 
 shouldClose :: World -> IO Bool
 shouldClose _ = windowShouldClose
