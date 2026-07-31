@@ -22,11 +22,13 @@ data Player = Player
   { _playerVelocity :: V2 Float
   , _playerPosition :: V2 Float
   }
+  deriving stock (Show)
 
 data GaTarget = GaTarget
   { _gaTargetVisible :: Bool
   , _gaTargetPosition :: V2 Float
   }
+  deriving stock (Show)
 
 data World = World
   { _worldPlayer :: Player
@@ -143,12 +145,12 @@ mainLoop world = do
         applyVelocity dt
         groundCollision
 
-  let rWorld = toScreenWorld newWorld
-      mainCam = Camera2D (V2 (fi windowWidth / 2) (fi windowHeight / 2)) (rWorld ^. player . position) 0 1
+  let displayWorld = toScreenWorld newWorld
+      mainCam = Camera2D (V2 (fi windowWidth / 2) (fi windowHeight / 2)) (displayWorld ^. player . position) 0 1
       _worldCam = Camera2D (V2 0 0) (V2 0 0) 0 1
       worldToScreen p = getWorldToScreen2D p mainCam
       screenToWorld p = getScreenToWorld2D p mainCam
-      ppos = rWorld ^. player . position
+      ppos = displayWorld ^. player . position
 
       drawPlayerSprite = do
         drawRectangleV ppos (V2 50 playerHeight) green
@@ -157,7 +159,8 @@ mainLoop world = do
       drawGround = drawLineEx (V2 (-999) 0) (V2 999 0) 4 black
 
       targetInRange =
-        newWorld ^. gaTargets
+        displayWorld ^. gaTargets
+          & traceShowId
           & filter (inRange gaLockonRange mousePosition . screenPosition)
           & sortOn (distance mousePosition . screenPosition)
           & nonEmpty
@@ -168,12 +171,12 @@ mainLoop world = do
   drawing $ do
     clearBackground gray
     drawCircleV mousePosition gaLockonRange pink
-    drawText ("Player height: " <> show (round $ ppos ^. _y :: Int)) 20 20 20 black
-    when (rWorld ^. gaActive) (drawText "GA active" 20 50 20 black)
+    drawText ("Player height: " <> show (round $ ppos ^. _y & negate :: Int)) 20 20 20 black
+    when (displayWorld ^. gaActive) (drawText "GA active" 20 50 20 black)
     mode2D mainCam $ do
       drawRectangle 0 0 200 200 red
       drawRectangle (div windowWidth 2) (div windowHeight 2) 200 200 black
-      traverse_ (\gaTarget -> drawCircleV (gaTarget ^. position) 10 brown) (rWorld ^. gaTargets)
+      traverse_ (\gaTarget -> drawCircleV (gaTarget ^. position) 10 brown) (displayWorld ^. gaTargets)
       traverse_ (\t -> drawLineEx (screenToWorld mousePosition) (t ^. position) 4 darkBrown) targetInRange
       drawGround
       drawPlayerSprite
