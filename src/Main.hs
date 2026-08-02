@@ -1,4 +1,5 @@
 {-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 module Main where
@@ -30,23 +31,24 @@ data GaTarget = GaTarget
   }
   deriving stock (Show)
 
+data GaPhase
+  = GaReady
+  | GaDashing (V2 Float)
+  | GaArrived Float
+  deriving stock (Show)
+
 data World = World
   { _worldPlayer :: Player
   , _worldWindowResources :: WindowResources
   , _worldGaTargets :: [GaTarget]
-  , _worldGaActive :: Bool
+  , _worldGaPhase :: GaPhase
+  , _worldGaCooldown :: Float
   , _worldSelectedGaTarget :: Maybe (V2 Float)
   }
 
-data Action
-  = MoveLeft
-  | MoveRight
-  | Jump
-  | GaStart
-  | GaStop
+data Action = MoveLeft | MoveRight | Jump | GaStart
   deriving stock (Eq, Show, Enum, Bounded)
 
--- | How an action's key should be sampled each frame.
 data Trigger = OnDown | OnPressed | OnReleased
 
 $(makeFields ''Player)
@@ -63,6 +65,14 @@ gravity = 2
 playerHeight = 80
 gaLockonRange = 120
 
+gaCooldownTime, gaJumpCooldownPenalty, gaDashSpeed, gaArrivalThreshold, gaArrivedDuration, gaJumpImpulse :: Float
+gaCooldownTime = 3
+gaJumpCooldownPenalty = 0
+gaDashSpeed = 700
+gaArrivalThreshold = 40
+gaArrivedDuration = 0.3
+gaJumpImpulse = 2000
+
 checkAction :: Action -> IO Bool
 checkAction a = case keyBinding a of
   (key, OnDown) -> isKeyDown key
@@ -73,17 +83,37 @@ checkAction a = case keyBinding a of
     keyBinding MoveLeft = (KeyA, OnDown)
     keyBinding MoveRight = (KeyD, OnDown)
     keyBinding Jump = (KeySpace, OnDown)
-    keyBinding GaStart = (KeyLeftShift, OnPressed)
-    keyBinding GaStop = (KeyLeftShift, OnReleased)
+    keyBinding GaStart = (KeyLeftShift, OnDown)
 
-applyAction :: Action -> State World ()
-applyAction MoveLeft = player . velocity . _x -= 10
-applyAction MoveRight = player . velocity . _x += 10
-applyAction Jump = do
-  grounded <- gets isOnGround
-  if grounded then player . velocity . _y += 400 else pass
-applyAction GaStart = gaActive .= True
-applyAction GaStop = gaActive .= False
+whenReady :: State World () -> State World ()
+whenReady action =
+  use gaPhase >>= \case
+    GaReady -> action
+    _ -> pass
+
+-- | mouseWorld is only needed for the Jump-during-GA cancel.
+applyAction :: V2 Float -> Action -> State World ()
+applyAction _ MoveLeft = whenReady $ player . velocity . _x -= 10
+applyAction _ MoveRight = whenReady $ player . velocity . _x += 10
+applyAction mouseWorld Jump =
+  use gaPhase >>= \case
+    GaReady -> do
+      grounded <- gets isOnGround
+      when grounded $ player . velocity . _y += 400
+    _ -> do
+      ppos <- use (player . position)
+      player . velocity .= gaJumpImpulse *^ normalize (mouseWorld - ppos)
+      gaPhase .= GaReady
+      gaCooldown += gaJumpCooldownPenalty
+applyAction _ GaStart = do
+  phase <- use gaPhase
+  cooldownReady <- (<= 0) <$> use gaCooldown
+  target <- use selectedGaTarget
+  case (phase, cooldownReady, target) of
+    (GaReady, True, Just t) -> do
+      gaPhase .= GaDashing t
+      gaCooldown .= gaCooldownTime
+    _ -> pass
 
 applyVelocity :: Float -> State World ()
 applyVelocity dt = do
@@ -94,13 +124,36 @@ applyVelocity dt = do
 applyGravity :: Float -> State World ()
 applyGravity dt = player . velocity . _y -= (gravity * 1000 * dt)
 
-applyGA :: Float -> State World ()
-applyGA dt = do
+{- | Sets this frame's velocity based on the current GA phase, then
+integrates position and resolves arrival/cooldown transitions.
+-}
+tick :: Float -> V2 Float -> [Action] -> State World ()
+tick dt mouseWorld actions = do
+  gaCooldown %= max 0 . subtract dt
+  traverse_ (applyAction mouseWorld) actions
+
+  use gaPhase >>= \case
+    GaReady -> applyGravity dt
+    GaArrived _ -> applyGravity dt
+    GaDashing target -> do
+      ppos <- use (player . position)
+      player . velocity .= gaDashSpeed *^ normalize (target - ppos)
+
+  applyVelocity dt
+  groundCollision
+  resolveGaPhase dt
+
+resolveGaPhase :: Float -> State World ()
+resolveGaPhase dt = do
+  phase <- use gaPhase
   ppos <- use (player . position)
-  gaActive' <- use gaActive
-  mTarget <- use selectedGaTarget
-  whenJust (mTarget <* guard gaActive') $ \target ->
-    player . velocity += (5000 * dt) *^ normalize (target - ppos)
+  case phase of
+    GaDashing target | inRange gaArrivalThreshold ppos target -> do
+      gaPhase .= GaArrived gaArrivedDuration
+    GaArrived remaining
+      | remaining - dt <= 0 -> gaPhase .= GaReady
+      | otherwise -> gaPhase .= GaArrived (remaining - dt)
+    _ -> pass
 
 groundCollision :: State World ()
 groundCollision = do
@@ -121,6 +174,16 @@ isOnGround w = w ^. player . position . _y - playerHeight <= 0
 inRange :: Float -> V2 Float -> V2 Float -> Bool
 inRange range p1 p2 = qd p1 p2 <= range ** 2
 
+camera :: World -> Camera2D
+camera w = Camera2D (V2 (fi windowWidth / 2) (fi windowHeight / 2)) (w ^. player . position) 0 1
+
+gaStatusText :: GaPhase -> Float -> String
+gaStatusText GaReady cd
+  | cd > 0 = "GA cooldown: " <> show (round cd :: Int) <> "s"
+  | otherwise = "GA ready"
+gaStatusText (GaDashing _) _ = "GA dashing"
+gaStatusText (GaArrived _) _ = "GA arrived"
+
 startup :: IO World
 startup = do
   window <- initWindow windowWidth windowHeight "raylib [core] example - basic window"
@@ -129,25 +192,19 @@ startup = do
       gaTargets' = liftA2 V2 (coord 8 (-2000)) (coord 50 300) & map (GaTarget True)
 
   setTargetFPS 144
-  return $ World (Player (V2 0 0) (V2 0 300)) window gaTargets' False Nothing
+  pure $ World (Player (V2 0 0) (V2 0 300)) window gaTargets' GaReady 0 Nothing
 
 mainLoop :: World -> IO World
 mainLoop world = do
   showCursor
-  pressedActions <- filterM checkAction universe
+  actions <- filterM checkAction universe
   mousePosition <- getMousePosition
   dt <- getFrameTime
 
-  let newWorld = flip execState world $ do
-        applyGravity dt
-        traverse_ applyAction pressedActions
-        applyGA dt
-        applyVelocity dt
-        groundCollision
-
-  let displayWorld = toScreenWorld newWorld
-      mainCam = Camera2D (V2 (fi windowWidth / 2) (fi windowHeight / 2)) (displayWorld ^. player . position) 0 1
-      _worldCam = Camera2D (V2 0 0) (V2 0 0) 0 1
+  let mouseWorld = getScreenToWorld2D mousePosition (camera (toScreenWorld world)) & _y %~ negate
+      newWorld = execState (tick dt mouseWorld actions) world
+      displayWorld = toScreenWorld newWorld
+      mainCam = camera displayWorld
       worldToScreen p = getWorldToScreen2D p mainCam
       screenToWorld p = getScreenToWorld2D p mainCam
       ppos = displayWorld ^. player . position
@@ -160,7 +217,6 @@ mainLoop world = do
 
       targetInRange =
         displayWorld ^. gaTargets
-          & traceShowId
           & filter (inRange gaLockonRange mousePosition . screenPosition)
           & sortOn (distance mousePosition . screenPosition)
           & nonEmpty
@@ -172,7 +228,7 @@ mainLoop world = do
     clearBackground gray
     drawCircleV mousePosition gaLockonRange pink
     drawText ("Player height: " <> show (round $ ppos ^. _y & negate :: Int)) 20 20 20 black
-    when (displayWorld ^. gaActive) (drawText "GA active" 20 50 20 black)
+    drawText (gaStatusText (displayWorld ^. gaPhase) (displayWorld ^. gaCooldown)) 20 50 20 black
     mode2D mainCam $ do
       drawRectangle 0 0 200 200 red
       drawRectangle (div windowWidth 2) (div windowHeight 2) 200 200 black
@@ -182,8 +238,10 @@ mainLoop world = do
       drawPlayerSprite
       drawText "Basic raylib window" 30 40 18 black
 
-  pure . flip execState newWorld $ do
-    selectedGaTarget .= (targetInRange <&> (view position >>> _y %~ negate))
+  pure
+    . flip execState newWorld
+    $ selectedGaTarget
+    .= (targetInRange <&> (view position >>> _y %~ negate))
 
 shouldClose :: World -> IO Bool
 shouldClose _ = windowShouldClose
