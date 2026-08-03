@@ -1,0 +1,81 @@
+name: Box2D
+version: 0.1.0.0
+git: "https://gitlab.com/dpwiz/box-nd"
+license: BSD-3-Clause
+author: "IC Rainbow"
+maintainer: "aenor.realm@gmail.com"
+copyright: "2026 IC Rainbow"
+
+extra-source-files:
+- README.md
+- CHANGELOG.md
+- cbits/*.h
+- upstream/LICENSE
+- upstream/include/box2d/*.h
+- upstream/src/*.h
+- upstream/src/*.inl
+
+# Metadata used when publishing your package
+synopsis: Low-level bindings to the Box2D physics engine
+category: Physics
+
+# description: |
+
+language: GHC2021
+default-extensions:
+- StrictData
+- DuplicateRecordFields
+- NoFieldSelectors
+- OverloadedRecordDot
+
+dependencies:
+- base >= 4.16 && < 5
+- vector >= 0.13 && < 0.14
+
+ghc-options:
+- -Wall
+- -Wcompat
+- -Widentities
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wmissing-export-lists
+- -Wmissing-home-modules
+- -Wpartial-fields
+- -Wredundant-constraints
+
+library:
+  source-dirs: src
+  include-dirs:
+  - cbits
+  - upstream/include
+  - upstream/src
+  c-sources:
+  - cbits/box2d_shim.c
+  - cbits/box2d_gen_shim.c
+  - upstream/src/*.c
+  cc-options:
+  - -std=c17
+  - -O2
+
+tests:
+  Box2D-test:
+    main: Spec.hs
+    source-dirs: test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - Box2D
+    - tasty
+    - tasty-hunit
+
+benchmarks:
+  Box2D-bench:
+    main: Bench.hs
+    source-dirs: bench
+    ghc-options:
+    - -O2
+    dependencies:
+    - Box2D
+    - tasty-bench

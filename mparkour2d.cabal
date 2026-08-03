@@ -6,7 +6,7 @@ author:        saygo-png
 maintainer:    saygo-png <saygo.mail@proton.me>
 
 common common-options
-  build-depends:      relude, h-raylib, linear, lens
+  build-depends:      relude, h-raylib, linear, lens, Box2D
   default-language:   GHC2024
   ghc-options:
     -Weverything

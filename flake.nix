@@ -43,6 +43,7 @@
           ghcPackages.ghc
           ghcPackages.cabal-install
           ghcPackages.haskell-language-server
+          ghcPackages.cabal-hoogle
 
           pkgs.pkg-config
           pkgs.zlib
