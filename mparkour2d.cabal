@@ -6,7 +6,7 @@ author:        saygo-png
 maintainer:    saygo-png <saygo.mail@proton.me>
 
 common common-options
-  build-depends:      relude, h-raylib, linear, lens, Box2D
+  build-depends:      base, containers, ghc-experimental, relude, linear, lens
   default-language:   GHC2024
   ghc-options:
     -Weverything
@@ -20,9 +20,6 @@ common common-options
     -Wno-safe
     -Wno-unsafe
     -Wno-unticked-promoted-constructors
-    -rtsopts
-    -threaded
-    -with-rtsopts=-N
 
   default-extensions:
     DuplicateRecordFields
@@ -37,3 +34,10 @@ executable mparkour2d
   import:         common-options
   hs-source-dirs: src
   main-is:        Main.hs
+  other-modules:
+    Web.Canvas
+    Web.Input
+    Web.Physics
+
+  -- A wasm reactor whose JS-exported `start` web/index.html calls.
+  ghc-options:    -no-hs-main -optl-mexec-model=reactor -optl-Wl,--export=start

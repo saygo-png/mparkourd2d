@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>mparkour2d</title>
+    <style>
+      body { margin: 0; height: 100vh; display: grid; place-items: center; overflow: hidden; background: #000; }
+      canvas { width: min(100vw, calc(100vh * 16 / 9)); }
+    </style>
+  </head>
+  <body>
+    <canvas id="screen" width="1920" height="1080"></canvas>
+    <script type="module">
+      // Standard GHC wasm JSFFI loader; the game itself starts in Haskell's `main`.
+      import { WASI, OpenFile, File, ConsoleStdout } from "https://cdn.jsdelivr.net/npm/@bjorn3/browser_wasi_shim@0.4.2/dist/index.js";
+      import jsffi from "./ghc_wasm_jsffi.js";
+
+      const stdio = [new OpenFile(new File([])), ConsoleStdout.lineBuffered(console.log), ConsoleStdout.lineBuffered(console.error)];
+      const wasi = new WASI([], [], stdio, { debug: false });
+      const exports = {};
+      const { instance } = await WebAssembly.instantiateStreaming(fetch("mparkour2d.wasm"), {
+        wasi_snapshot_preview1: wasi.wasiImport,
+        ghc_wasm_jsffi: jsffi(exports),
+      });
+      Object.assign(exports, instance.exports);
+      wasi.initialize(instance);
+      await instance.exports.start();
+    </script>
+  </body>
+</html>
