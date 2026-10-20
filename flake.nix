@@ -22,30 +22,32 @@
   };
 
   outputs = {
-    self,
     nixpkgs,
     systems,
     treefmt-nix,
     ...
   } @ inputs: let
-    pkgsFor = nixpkgs.lib.genAttrs (import systems) (system: import nixpkgs {inherit system;});
-    eachSystem = f: nixpkgs.lib.genAttrs (import systems) (system: f system pkgsFor.${system});
+    eachSystem = f: nixpkgs.lib.genAttrs (import systems) (system: f nixpkgs.legacyPackages.${system});
+    wasmHaskellPackages = pkgs: pkgs.callPackage ./nix/wasm-haskell.nix {inherit (inputs) ghc-wasm-meta;};
   in {
     # `nix run` serves the game on http://localhost:8000 (`nix run . -- PORT` for another port).
-    packages = eachSystem (_system: pkgs: {
-      default = pkgs.callPackage ./nix/package.nix {inherit (inputs) ghc-wasm-meta box2d3-wasm browser-wasi-shim;};
-    });
-
-    formatter = eachSystem (_system: pkgs: (treefmt-nix.lib.evalModule pkgs ./nix/treefmt.nix).config.build.wrapper);
-
-    # For incremental builds: `web/build.sh`, then serve web/.
-    devShells = eachSystem (system: pkgs: let
-      game = self.packages.${system}.default;
-    in {
-      default = pkgs.mkShell {
-        packages = game.toolchain;
-        WEB_VENDOR = game.vendor;
+    packages = eachSystem (pkgs: {
+      default = pkgs.callPackage ./nix/package.nix {
+        wasmHaskellPackages = wasmHaskellPackages pkgs;
+        inherit (inputs) box2d3-wasm browser-wasi-shim;
       };
     });
+
+    # wasm32-wasi-ghc and wasm32-wasi-cabal, for compiling with cabal directly.
+    devShells = eachSystem (pkgs: {
+      default = pkgs.mkShell {
+        packages = [
+          (wasmHaskellPackages pkgs).ghc
+          (pkgs.callPackage "${inputs.ghc-wasm-meta}/pkgs/wasm32-wasi-cabal.nix" {flavour = "9.12";})
+        ];
+      };
+    });
+
+    formatter = eachSystem (pkgs: (treefmt-nix.lib.evalModule pkgs ./nix/treefmt.nix).config.build.wrapper);
   };
 }

@@ -28,7 +28,4 @@ cabal.project.local~
 .HTF/
 .ghc.environment.*
 tags
-web/mparkour2d.wasm
-web/ghc_wasm_jsffi.js
 /src/tags
-web/vendor/

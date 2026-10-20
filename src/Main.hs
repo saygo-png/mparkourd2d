@@ -4,13 +4,14 @@
 
 module Main where
 
-import Control.Lens hiding (universe)
+import Canvas
+import Control.Lens hiding (Context, universe)
+import GHC.Wasm.Prim (JSString, toJSString)
+import Input
 import Linear
+import Physics (BodyId, BodyType (..), ShapeId, WorldId)
+import Physics qualified
 import Relude
-import Web.Canvas
-import Web.Input
-import Web.Physics (BodyId, BodyType (..), ShapeId, WorldId)
-import Web.Physics qualified as Physics
 
 fi :: forall a b. (Integral a, Num b) => a -> b
 fi = fromIntegral
@@ -61,11 +62,19 @@ gravityAccel = 10
 playerOrigin :: V2 Float
 playerOrigin = V2 585 500
 
-checkAction :: Action -> IO Bool
-checkAction a = case keyBinding a of
-  (key, OnDown) -> isKeyDown key
-  (key, OnPressed) -> isKeyPressed key
-  (key, OnReleased) -> isKeyReleased key
+gray, pink, red, green, brown, black :: JSString
+gray = toJSString "rgb(130 130 130)"
+pink = toJSString "rgb(255 109 194)"
+red = toJSString "rgb(230 41 55)"
+green = toJSString "rgb(0 228 48)"
+brown = toJSString "rgb(127 106 79)"
+black = toJSString "rgb(0 0 0)"
+
+checkAction :: Input -> Action -> IO Bool
+checkAction input a = case keyBinding a of
+  (key, OnDown) -> isKeyDown input key
+  (key, OnPressed) -> isKeyPressed input key
+  (key, OnReleased) -> isKeyReleased input key
   where
     keyBinding :: Action -> (Text, Trigger)
     keyBinding MoveLeft = ("KeyA", OnDown)
@@ -73,11 +82,11 @@ checkAction a = case keyBinding a of
     keyBinding Jump = ("Space", OnDown)
     keyBinding GetPos = ("KeyP", OnDown)
 
-applyAction :: World -> Action -> IO ()
-applyAction w MoveLeft = Physics.applyForceToCenter (w ^. player . bodyID) (v2 (-3000) 0) True
-applyAction w MoveRight = Physics.applyForceToCenter (w ^. player . bodyID) (v2 3000 0) True
-applyAction w Jump = Physics.applyForceToCenter (w ^. player . bodyID) (v2 0 (-9000)) True
-applyAction _ GetPos = print =<< getMousePosition
+applyAction :: Input -> World -> Action -> IO ()
+applyAction _ w MoveLeft = Physics.applyForceToCenter (w ^. player . bodyID) (v2 (-3000) 0) True
+applyAction _ w MoveRight = Physics.applyForceToCenter (w ^. player . bodyID) (v2 3000 0) True
+applyAction _ w Jump = Physics.applyForceToCenter (w ^. player . bodyID) (v2 0 (-9000)) True
+applyAction input _ GetPos = print =<< getMousePosition input
 
 startup :: IO World
 startup = do
@@ -94,33 +103,33 @@ startup = do
 
   pure $ World physicsWorldID (Player body shape) gaTargets'
 
-mainLoop :: Float -> World -> IO World
-mainLoop dt world = do
-  actions <- filterM checkAction universe
-  mousePosition <- getMousePosition
+mainLoop :: Context -> Input -> Float -> World -> IO World
+mainLoop ctx input dt world = do
+  actions <- filterM (checkAction input) universe
+  mousePosition <- getMousePosition input
 
-  traverse_ (applyAction world) actions
+  traverse_ (applyAction input world) actions
   Physics.step world._physicsWorldID (dt * 10) 4
 
   ppos <- flipY <$> Physics.getPosition (world ^. player . bodyID)
 
   let
     drawPlayerSprite = do
-      drawCircleV ppos 10 green
-      drawText "PLAYER" (round $ ppos ^. _x - 17) (round $ ppos ^. _y - 20) 20 black
+      fillCircle ctx green ppos 10
+      fillText ctx black 20 (V2 (ppos ^. _x - 17) (ppos ^. _y - 20)) "PLAYER"
 
-    drawGround = drawLineEx (V2 (-999) 1000) (V2 999 1000) 4 black
+    drawGround = strokeLine ctx black 4 (V2 (-999) 1000) (V2 999 1000)
 
-  clearBackground gray
-  drawCircleV mousePosition 100 pink
-  drawCircleV playerOrigin 30 red
-  drawText ("Player height: " <> show (round $ ppos ^. _y & negate :: Int)) 20 20 20 black
+  fillRect ctx gray (V2 0 0) (fi <$> V2 windowWidth windowHeight)
+  fillCircle ctx pink mousePosition 100
+  fillCircle ctx red playerOrigin 30
+  fillText ctx black 20 (V2 20 20) ("Player height: " <> show (round $ ppos ^. _y & negate :: Int))
 
-  drawRectangle (div windowWidth 2) (div windowHeight 2) 200 200 black
-  traverse_ (\gaTarget -> drawCircleV (gaTarget ^. position) 10 brown) (world ^. gaTargets)
+  fillRect ctx black (fi <$> V2 (div windowWidth 2) (div windowHeight 2)) (V2 200 200)
+  traverse_ (\gaTarget -> fillCircle ctx brown (gaTarget ^. position) 10) (world ^. gaTargets)
   drawGround
   drawPlayerSprite
-  drawText "Basic canvas window" 30 40 18 black
+  fillText ctx black 18 (V2 30 40) "Basic canvas window"
 
   pure world
 
@@ -135,12 +144,13 @@ nextFrame = (/ 1000) <$> (evaluateWHNF =<< js_nextFrame)
 main :: IO ()
 main = do
   Physics.loadBox2D
-  listenForInput
+  ctx <- getContext
+  input <- newInput
   let loop t world = do
         t' <- nextFrame
         -- Clamped so a backgrounded tab doesn't hand the physics a huge step.
-        world' <- mainLoop (realToFrac (min 0.05 (t' - t))) world
-        endFrame
+        world' <- mainLoop ctx input (realToFrac (min 0.05 (t' - t))) world
+        endFrame input
         loop t' world'
   join $ loop <$> nextFrame <*> startup
 
