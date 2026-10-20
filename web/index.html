@@ -12,7 +12,7 @@
     <canvas id="screen" width="1920" height="1080"></canvas>
     <script type="module">
       // Standard GHC wasm JSFFI loader; the game itself starts in Haskell's `main`.
-      import { WASI, OpenFile, File, ConsoleStdout } from "https://cdn.jsdelivr.net/npm/@bjorn3/browser_wasi_shim@0.4.2/dist/index.js";
+      import { WASI, OpenFile, File, ConsoleStdout } from "./vendor/browser_wasi_shim/index.js";
       import jsffi from "./ghc_wasm_jsffi.js";
 
       const stdio = [new OpenFile(new File([])), ConsoleStdout.lineBuffered(console.log), ConsoleStdout.lineBuffered(console.error)];

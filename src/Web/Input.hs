@@ -47,10 +47,12 @@ foreign import javascript unsafe "$1.offsetY * $1.target.height / $1.target.clie
 
 listenForInput :: IO ()
 listenForInput = do
-  onEvent js_onWindow "keydown" $ \e -> key e >>= \k -> modifyIORef' keysRef $ \ks ->
-    if Set.member k ks.down then ks else ks{down = Set.insert k ks.down, pressed = Set.insert k ks.pressed}
-  onEvent js_onWindow "keyup" $ \e -> key e >>= \k -> modifyIORef' keysRef $ \ks ->
-    ks{down = Set.delete k ks.down, released = Set.insert k ks.released}
+  onEvent js_onWindow "keydown" $ \e ->
+    key e >>= \k -> modifyIORef' keysRef $ \ks ->
+      if Set.member k ks.down then ks else ks{down = Set.insert k ks.down, pressed = Set.insert k ks.pressed}
+  onEvent js_onWindow "keyup" $ \e ->
+    key e >>= \k -> modifyIORef' keysRef $ \ks ->
+      ks{down = Set.delete k ks.down, released = Set.insert k ks.released}
   onEvent js_onWindow "blur" $ \_ -> modifyIORef' keysRef $ \ks ->
     ks{down = mempty, released = ks.released <> ks.down}
   onEvent js_onCanvas "pointermove" $ \e -> writeIORef mouseRef =<< (V2 <$> js_mouseX e <*> js_mouseY e)

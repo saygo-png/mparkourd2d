@@ -1,29 +1,47 @@
 {
   "nodes": {
-    "niceHaskell": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ],
-        "systems": [
-          "systems"
-        ],
-        "treefmt-nix": [
-          "treefmt-nix"
-        ]
-      },
+    "box2d3-wasm": {
+      "flake": false,
       "locked": {
-        "lastModified": 1769957634,
-        "narHash": "sha256-z3otKLzVNniGJR3mPqYs7MNWTEaTkrhCukJBYv8AIhw=",
-        "owner": "saygo-png",
-        "repo": "nice-nixpkgs-haskell",
-        "rev": "7022cfcd645c4b831716d4a56970feea7caa2906",
-        "type": "github"
+        "lastModified": 499162500,
+        "narHash": "sha256-cx0uetjGkl5RgxF1PAWZd+lCcYkPmch8xV1wvzTrx10=",
+        "type": "tarball",
+        "url": "https://registry.npmjs.org/box2d3-wasm/-/box2d3-wasm-5.2.0.tgz"
       },
       "original": {
-        "owner": "saygo-png",
-        "repo": "nice-nixpkgs-haskell",
-        "type": "github"
+        "type": "tarball",
+        "url": "https://registry.npmjs.org/box2d3-wasm/-/box2d3-wasm-5.2.0.tgz"
+      }
+    },
+    "browser-wasi-shim": {
+      "flake": false,
+      "locked": {
+        "lastModified": 499162500,
+        "narHash": "sha256-lfKZk1ZFchBCqon+Pr+PoT1Kb6Hq8O+0NKsalWEfCnI=",
+        "type": "tarball",
+        "url": "https://registry.npmjs.org/@bjorn3/browser_wasi_shim/-/browser_wasi_shim-0.4.2.tgz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://registry.npmjs.org/@bjorn3/browser_wasi_shim/-/browser_wasi_shim-0.4.2.tgz"
+      }
+    },
+    "ghc-wasm-meta": {
+      "flake": false,
+      "locked": {
+        "host": "gitlab.haskell.org",
+        "lastModified": 1791804790,
+        "narHash": "sha256-Bi4vIdDi1kp21EwXoYOQJQZFvETRhPBC2QIFdu8A5K8=",
+        "owner": "haskell-wasm",
+        "repo": "ghc-wasm-meta",
+        "rev": "8079eb96bbc63823d99ad8acaff0765532625474",
+        "type": "gitlab"
+      },
+      "original": {
+        "host": "gitlab.haskell.org",
+        "owner": "haskell-wasm",
+        "repo": "ghc-wasm-meta",
+        "type": "gitlab"
       }
     },
     "nixpkgs": {
@@ -60,7 +78,9 @@
     },
     "root": {
       "inputs": {
-        "niceHaskell": "niceHaskell",
+        "box2d3-wasm": "box2d3-wasm",
+        "browser-wasi-shim": "browser-wasi-shim",
+        "ghc-wasm-meta": "ghc-wasm-meta",
         "nixpkgs": "nixpkgs",
         "systems": "systems",
         "treefmt-nix": "treefmt-nix"
