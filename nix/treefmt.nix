@@ -8,7 +8,11 @@
   programs.alejandra.enable = true;
   programs.deadnix.enable = true;
   programs.statix.enable = true;
-  programs.fourmolu.enable = true;
+  programs.fourmolu = {
+    enable = true;
+    # The statically linked build; haskellPackages.fourmolu pulls in a whole GHC.
+    package = pkgs.fourmolu;
+  };
   programs.cabal-fmt.enable = true;
 
   settings.formatter = {
