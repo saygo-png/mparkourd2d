@@ -36,6 +36,10 @@
     inherit (nixpkgs) lib;
     eachSystem = f: lib.genAttrs (import systems) (system: f nixpkgs.legacyPackages.${system});
 
+    # The GHC everything uses: the wasm one from ghc-wasm-meta, and the native
+    # one from nixpkgs for the dev shell and build tools.
+    ghcVersion = "9.12";
+
     # The game and miso, added to a Haskell package set: the wasm one for the
     # build, a native one for HLS.
     localPackages = self: _: {
@@ -46,7 +50,12 @@
         fileset = lib.fileset.unions [./mparkour2d.cabal ./src];
       }) {};
     };
-    wasmHaskellPackages = pkgs: (pkgs.callPackage ./nix/wasm-haskell.nix {inherit (inputs) ghc-wasm-meta;}).extend localPackages;
+    wasmHaskellPackages = pkgs:
+      (pkgs.callPackage ./nix/wasm-haskell.nix {
+        inherit (inputs) ghc-wasm-meta;
+        inherit ghcVersion;
+      }).extend
+      localPackages;
   in {
     # `nix run` serves the game on http://localhost:8000 (`nix run . -- PORT` for another port).
     packages = eachSystem (pkgs: {
@@ -56,10 +65,10 @@
       };
     });
 
-    # Native GHC 9.12 with the game's dependencies, cabal and HLS, for working
-    # on the game. Also wasm32-wasi-ghc and wasm32-wasi-cabal for the wasm side.
+    # Native GHC with the game's dependencies, cabal and HLS, for working on
+    # the game. Also wasm32-wasi-ghc and wasm32-wasi-cabal for the wasm side.
     devShells = eachSystem (pkgs: let
-      native = pkgs.haskell.packages.ghc912.extend localPackages;
+      native = (wasmHaskellPackages pkgs).buildHaskellPackages.extend localPackages;
     in {
       default = native.shellFor {
         packages = p: [p.mparkour2d];
@@ -67,7 +76,7 @@
           native.haskell-language-server
           pkgs.cabal-install
           (wasmHaskellPackages pkgs).ghc
-          (pkgs.callPackage "${inputs.ghc-wasm-meta}/pkgs/wasm32-wasi-cabal.nix" {flavour = "9.12";})
+          (pkgs.callPackage "${inputs.ghc-wasm-meta}/pkgs/wasm32-wasi-cabal.nix" {flavour = ghcVersion;})
         ];
       };
     });

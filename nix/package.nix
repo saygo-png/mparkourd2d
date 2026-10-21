@@ -5,13 +5,19 @@
   runCommand,
   makeWrapper,
   writers,
-  haskellPackages,
   nodejs,
   wasmHaskellPackages,
   box2d3-wasm,
   browser-wasi-shim,
 }: let
-  serve = writers.writeHaskellBin "serve" {libraries = [haskellPackages.wai-app-static haskellPackages.warp];} ./serve.hs;
+  serve =
+    writers.writeHaskellBin "serve" {
+      # The native GHC the game's package set builds with; the default is
+      # haskellPackages', which would mean downloading another GHC.
+      inherit (wasmHaskellPackages.buildHaskellPackages) ghc;
+      libraries = p: [p.wai-app-static p.warp];
+    }
+    ./serve.hs;
 in
   runCommand "mparkour2d" {
     nativeBuildInputs = [wasmHaskellPackages.ghc nodejs makeWrapper];

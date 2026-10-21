@@ -73,7 +73,7 @@ in Box2D are a tenth of the speed on screen; `setVelocity` in `Main.hs` converts
 
 ## Developing
 
-`nix develop` gives you native GHC 9.12 with the game's dependencies, `cabal`
+`nix develop` gives you native GHC with the game's dependencies, `cabal`
 and HLS. miso compiles natively too (its JS calls just aren't usable there), so
 HLS and `cabal build` work on all of the code. For the real thing, `nix run`
 builds it for wasm; after the first build only the game is rebuilt.
@@ -83,11 +83,12 @@ The shell also has `wasm32-wasi-cabal`, for building the wasm by hand
 
 ## The build
 
-- `nix/wasm-haskell.nix` is nixpkgs' GHC 9.12 Haskell package set, with its
+- `nix/wasm-haskell.nix` is nixpkgs' Haskell package set, with its
   compiler swapped for the wasm GHC from
   [ghc-wasm-meta](https://gitlab.haskell.org/haskell-wasm/ghc-wasm-meta).
   Dependency versions come from nixpkgs, and each dependency is its own cached
-  derivation.
+  derivation. The GHC version is `ghcVersion` in `flake.nix`, the one place to
+  change it; it picks both the wasm GHC and nixpkgs' native package set.
 - `flake.nix` adds miso (with its `template-haskell` flag, for `[js| |]`) and
   `mparkour2d` to that set with `callCabal2nix`. It also adds them to the
   native set, for the dev shell.
