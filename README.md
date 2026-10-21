@@ -7,6 +7,7 @@ WebAssembly, written in the Elm architecture with
 ```sh
 nix run              # build and serve on http://localhost:8000
 nix run . -- 8080    # another port
+nix run .#optimized  # optimized like the deployed build (slower to build)
 ```
 
 Controls: `A`/`D` push left and right, `Space` pushes up, `P` prints the mouse
@@ -90,16 +91,45 @@ The shell also has `wasm32-wasi-cabal`, for building the wasm by hand
   derivation. The GHC version is `ghcVersion` in `flake.nix`, the one place to
   change it; it picks both the wasm GHC and nixpkgs' native package set.
 - `flake.nix` adds miso (with its `template-haskell` flag, for `[js| |]`) and
-  `mparkour2d` to that set with `callCabal2nix`. It also adds them to the
-  native set, for the dev shell.
-- `nix/package.nix` takes the built `.wasm` and generates `ghc_wasm_jsffi.js`
-  with GHC's post-linker; this is the JS half of the Haskell↔JS calls. It puts
-  both next to `index.html` and the JS libraries.
-- `nix/serve.hs` is the server `nix run` starts: Warp serving the site with
-  caching turned off. Everything in the Nix store is dated 1970, so a browser
+  `mparkour2d` to that set with `callCabal2nix`, building the game without
+  optimization for `nix run`. `nix run .#optimized` uses a second set where
+  every package gets the flags of `cabal.project.release`. It also adds them to
+  the native set, for the dev shell.
+- `web/build-site.sh` puts the site together from the built `.wasm`: it
+  generates `ghc_wasm_jsffi.js` with GHC's post-linker (the JS half of the
+  Haskell↔JS calls) and puts both next to `index.html` and the JS libraries.
+  `nix/site.nix` runs it on the Nix-built game.
+- `nix/package.nix` is what `nix run` starts: `nix/serve.hs`, Warp serving the
+  site with caching turned off. Everything in the Nix store is dated 1970, so a browser
   that caches the files never notices a new build.
 - Every external piece is a flake input: nixpkgs (and with it the Haskell
   dependencies), ghc-wasm-meta, miso, box2d3-wasm and browser_wasi_shim (which
   gives the wasm module stdout/stderr in the console). `nix flake update`
   updates them; miso and the JS libraries are tarballs pinned by version in
   `flake.nix`.
+
+## Deploying
+
+`.github/workflows/deploy.yaml` builds the game and publishes it on GitHub
+Pages on every push to `main`. It needs Pages' source set to "GitHub Actions"
+in the repository's settings.
+
+CI doesn't use `nix build`: nixpkgs compiles every Haskell package's
+`Setup.hs` with a native GHC, which would be several GB more to download or
+cache. Instead it builds with `wasm32-wasi-cabal` in the `wasm` dev shell, which
+only has the wasm toolchain (`nix develop .#wasm`), and with
+`cabal.project.release`: `-O2`, aggressive specialisation across packages, and
+a pinned Hackage `index-state` (bump it to update the dependencies). Then it runs
+`web/build-site.sh`.
+
+Two caches keep it quick: the Nix store, which only holds the wasm toolchain
+(about 1 GB), and the cabal store with the built dependencies (under 100 MB).
+Without them, a build takes a few minutes.
+
+To build what CI deploys locally:
+
+```sh
+nix develop .#wasm
+wasm32-wasi-cabal build --project-file=cabal.project.release exe:mparkour2d
+web/build-site.sh "$(wasm32-wasi-cabal list-bin --project-file=cabal.project.release exe:mparkour2d)" publish
+```

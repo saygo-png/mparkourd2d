@@ -1,0 +1,15 @@
+-- The optimized build CI deploys to GitHub Pages (.github/workflows/deploy.yaml):
+-- wasm32-wasi-cabal build --project-file=cabal.project.release
+import: cabal.project
+
+-- Pinned, so dependency versions (and the CI cache key, which hashes this file)
+-- only change when this is bumped.
+index-state: 2026-10-21T17:16:35Z
+
+optimization: 2
+
+-- -O2 for the dependencies too, with all their unfoldings exposed so GHC can
+-- specialise their code for the game.
+package *
+  optimization: 2
+  ghc-options: -fexpose-all-unfoldings -fspecialise-aggressively
