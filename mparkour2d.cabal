@@ -6,20 +6,13 @@ author:        saygo-png
 maintainer:    saygo-png <saygo.mail@proton.me>
 
 common common-options
-  build-depends:      ghc-experimental, lens, linear, relude, web-game
   default-language:   GHC2024
   ghc-options:
-    -Weverything
-    -Wno-all-missed-specialisations
-    -Wno-missed-specialisations
-    -Wno-missing-exported-signatures
-    -Wno-missing-import-lists
-    -Wno-missing-kind-signatures
-    -Wno-missing-local-signatures
-    -Wno-missing-safe-haskell-mode
-    -Wno-safe
-    -Wno-unsafe
-    -Wno-unticked-promoted-constructors
+    -Weverything -Wno-all-missed-specialisations
+    -Wno-missed-specialisations -Wno-missing-exported-signatures
+    -Wno-missing-import-lists -Wno-missing-kind-signatures
+    -Wno-missing-local-signatures -Wno-missing-safe-haskell-mode
+    -Wno-safe -Wno-unsafe -Wno-unticked-promoted-constructors
 
   default-extensions:
     DuplicateRecordFields
@@ -34,6 +27,16 @@ executable mparkour2d
   import:         common-options
   hs-source-dirs: src
   main-is:        Main.hs
+  other-modules:  Box2D
+  build-depends:
+    , containers
+    , lens
+    , linear
+    , miso
+    , relude
 
-  -- A wasm module whose exported `start` (Main.main) web/index.html calls.
-  ghc-options:    -no-hs-main -optl-mexec-model=reactor -optl-Wl,--export=start
+  -- In the browser it's a wasm module whose exported `start` (Main.main)
+  -- web/index.html calls. Native builds are for HLS.
+  if arch(wasm32)
+    ghc-options:
+      -no-hs-main -optl-mexec-model=reactor "-optl-Wl,--export=start"

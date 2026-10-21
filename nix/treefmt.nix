@@ -27,9 +27,6 @@
         "--indent-wheres"
         "true"
       ];
-      # fourmolu's parser (ghc-lib-parser 9.12.3) rejects the multiline JS
-      # strings in these modules' foreign imports, though GHC accepts them.
-      excludes = ["web-game/src/Web/Box2D.hs" "web-game/src/Web/Canvas.hs" "web-game/src/Web/Input.hs"];
     };
 
     trim-newlines = {

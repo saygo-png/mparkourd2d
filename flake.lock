@@ -44,6 +44,19 @@
         "type": "gitlab"
       }
     },
+    "miso": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1000000000,
+        "narHash": "sha256-lvawmT572RFs0gJeM2sn0Y1RLh9vpCctSM+HQWMQLZ0=",
+        "type": "tarball",
+        "url": "https://hackage.haskell.org/package/miso-1.14.0.0/miso-1.14.0.0.tar.gz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://hackage.haskell.org/package/miso-1.14.0.0/miso-1.14.0.0.tar.gz"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1785090369,
@@ -81,6 +94,7 @@
         "box2d3-wasm": "box2d3-wasm",
         "browser-wasi-shim": "browser-wasi-shim",
         "ghc-wasm-meta": "ghc-wasm-meta",
+        "miso": "miso",
         "nixpkgs": "nixpkgs",
         "systems": "systems",
         "treefmt-nix": "treefmt-nix"

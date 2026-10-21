@@ -9,12 +9,16 @@
     </style>
   </head>
   <body>
-    <canvas id="screen" width="1920" height="1080"></canvas>
     <script type="module">
-      // Standard GHC wasm JSFFI loader; the game itself starts in Haskell's `main`.
+      // The game draws on the canvas miso adds to <body>, and uses Box2D through
+      // the global `b2` (see src/Box2D.hs).
+      import box2d from "./vendor/box2d3-wasm/Box2D.compat.mjs";
       import { WASI, OpenFile, File, ConsoleStdout } from "./vendor/browser_wasi_shim/index.js";
       import jsffi from "./ghc_wasm_jsffi.js";
 
+      globalThis.b2 = await box2d();
+
+      // Standard GHC wasm JSFFI loader; `start` is the game's `main`.
       const stdio = [new OpenFile(new File([])), ConsoleStdout.lineBuffered(console.log), ConsoleStdout.lineBuffered(console.error)];
       const wasi = new WASI([], [], stdio, { debug: false });
       const exports = {};

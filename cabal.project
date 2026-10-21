@@ -1,3 +1,7 @@
-packages: . web-game
+packages: .
 optimization: 0
 documentation: True
+
+-- For Miso.FFI.QQ, which src/Box2D.hs uses.
+package miso
+  flags: +template-haskell

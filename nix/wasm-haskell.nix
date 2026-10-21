@@ -26,6 +26,8 @@ in
         super.mkDerivation (args
           // {
             doCheck = false; # Test suites would be wasm, which the build can't run.
+            # Template Haskell in a library fails in the profiling build on wasm.
+            enableLibraryProfiling = false;
             dontStrip = true; # The native strip doesn't understand wasm.
             configureFlags =
               (args.configureFlags or [])

@@ -1,7 +1,8 @@
 # mparkour2d
 
 A 2D Box2D game in Haskell that runs in the browser. It is compiled to
-WebAssembly, draws on a canvas, and works offline.
+WebAssembly, written in the Elm architecture with
+[miso](https://github.com/haskell-miso/miso), and works offline.
 
 ```sh
 nix run              # build and serve on http://localhost:8000
@@ -13,67 +14,72 @@ position to the browser console.
 
 ## How it works
 
-```
-web/index.html ── starts ──▶ mparkour2d.wasm   (GHC runtime + your Haskell)
-                               │ foreign import javascript
-                               ├──▶ canvas, DOM events, requestAnimationFrame
-                               └──▶ vendor/box2d3-wasm   (Box2D compiled to wasm)
-```
+| Path | What it is |
+| --- | --- |
+| `src/Main.hs` | The game, as a miso app: a `Model`, the `Msg`s that change it, `update`, and a `view` that draws the model on a canvas. |
+| `src/Box2D.hs` | The Box2D functions the game uses, each a few lines of JS. |
+| `web/index.html` | Loads Box2D and the wasm module, then calls `start` (the game's `main`). |
 
-GHC's WebAssembly backend compiles the game to one `.wasm` module. The game
-talks to the browser through
-[`foreign import javascript`](https://ghc.gitlab.haskell.org/ghc/doc/users_guide/wasm.html#javascript-ffi-in-the-wasm-backend):
-a JS snippet in a Haskell declaration, with `$1`, `$2`, … as its arguments.
+Each frame miso sends `Frame time` (from `rAFSub`). `update` then pushes the
+player according to the held keys (from `keyboardSub`), steps the physics world,
+and stores the player's new position. miso redraws the canvas from the new
+model with `view`.
+
+Box2D is [box2d3-wasm](https://github.com/Birch-san/box2d3-wasm), Box2D v3
+compiled to wasm by Emscripten. It is a separate wasm module, so the game uses
+it through JS, as the global `b2`. Box2D's objects (worlds, bodies, shapes) stay
+in JS; the game holds them as `JSVal`s and passes them back to Box2D. Physics is
+y-up and the screen is y-down; `flipY` and `v2` in `Main.hs` convert between
+them.
+
+### Using more of Box2D
+
+Add a function to `src/Box2D.hs`. miso's `[js| ... |]` quasiquote runs the JS
+with `${x}` replaced by the Haskell value `x`, and converts what it returns to
+the function's result type:
 
 ```haskell
-foreign import javascript unsafe
-  """
-  $1.fillStyle = $2;
-  $1.fillRect($3, $4, $5, $6);
-  """
-  js_fillRect :: Context -> JSString -> Float -> Float -> Float -> Float -> IO ()
+setLinearVelocity :: Body -> V2 Double -> IO ()
+setLinearVelocity body (V2 x y) =
+  [js|
+    const v = new b2.b2Vec2(${x}, ${y});
+    b2.b2Body_SetLinearVelocity(${body}, v);
+    v.delete();
+  |]
 ```
 
-`unsafe` imports run synchronously. Imports without it may `await` a promise,
-which pauses only the calling Haskell thread. `nextFrame` uses that to wait
-for `requestAnimationFrame`.
+Box2D's vectors and definitions are Emscripten objects; `.delete()` the ones you
+create. The JS API mirrors Box2D's C API (`b2Body_SetLinearVelocity(bodyId,
+velocity)`), see the [Box2D docs](https://box2d.org/documentation/).
 
-The bindings are a separate library, [`web-game/`](web-game/README.md), so
-other games can reuse them:
+Call it from `update` inside `io`, which runs `IO` and turns its result into the
+next `Msg`.
 
-| File | What it does |
-| --- | --- |
-| `src/Main.hs` | The game: world setup, input handling, physics step, drawing, and the frame loop. `main` is exported to JS as `start`. |
-| `web-game/` | The library: `Web.Canvas` (drawing), `Web.Input` (keyboard and mouse), `Web.Frame` (`nextFrame`), `Web.Box2D` (physics). |
-| `web/index.html` | The page: a 1920×1080 canvas scaled to the window, and the few lines of JS that load the wasm module and call `start`. |
+## Developing
 
-Physics uses Box2D's y-up coordinates, and the screen is y-down. `flipY` and
-`v2` in `Main.hs` convert between them.
+`nix develop` gives you native GHC 9.12 with the game's dependencies, `cabal`
+and HLS. miso compiles natively too (its JS calls just aren't usable there), so
+HLS and `cabal build` work on all of the code. For the real thing, `nix run`
+builds it for wasm; after the first build only the game is rebuilt.
 
-### The build
+The shell also has `wasm32-wasi-cabal`, for building the wasm by hand
+(`wasm32-wasi-cabal build`).
+
+## The build
 
 - `nix/wasm-haskell.nix` is nixpkgs' GHC 9.12 Haskell package set, with its
   compiler swapped for the wasm GHC from
   [ghc-wasm-meta](https://gitlab.haskell.org/haskell-wasm/ghc-wasm-meta).
   Dependency versions come from nixpkgs, and each dependency is its own cached
   derivation.
-- `nix/package.nix` adds `web-game` to that set and builds the game with
-  `callCabal2nix`. GHC's post-linker
-  then generates `ghc_wasm_jsffi.js`, the JS half of the foreign imports. The
-  result is put next to `index.html` and the JS libraries.
+- `flake.nix` adds miso (with its `template-haskell` flag, for `[js| |]`) and
+  `mparkour2d` to that set with `callCabal2nix`. It also adds them to the
+  native set, for the dev shell.
+- `nix/package.nix` takes the built `.wasm` and generates `ghc_wasm_jsffi.js`
+  with GHC's post-linker; this is the JS half of the Haskell↔JS calls. It puts
+  both next to `index.html` and the JS libraries.
 - Every external piece is a flake input: nixpkgs (and with it the Haskell
-  dependencies), ghc-wasm-meta, box2d3-wasm and browser_wasi_shim (which
+  dependencies), ghc-wasm-meta, miso, box2d3-wasm and browser_wasi_shim (which
   gives the wasm module stdout/stderr in the console). `nix flake update`
-  updates them. The two JS libraries are npm tarballs pinned by version in
+  updates them; miso and the JS libraries are tarballs pinned by version in
   `flake.nix`.
-
-Add Haskell dependencies to `mparkour2d.cabal` (or `web-game/web-game.cabal`)
-as usual. `nix develop` gives you
-`wasm32-wasi-cabal` and `wasm32-wasi-ghc` for quick compiles with cabal
-(dependencies from Hackage).
-
-## Using more of Box2D
-
-The game can only use the Box2D functions bound in
-`web-game/src/Web/Box2D.hs`. The [web-game README](web-game/README.md#binding-more-of-box2d)
-shows how to bind more, with an example.

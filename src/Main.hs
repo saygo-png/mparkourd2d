@@ -1,151 +1,212 @@
-{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Main where
+module Main (main) where
 
-import Control.Lens hiding (Context, universe)
-import GHC.Wasm.Prim (JSString, toJSString)
-import Linear
-import Relude
-import Web.Box2D (BodyId, BodyType (..), ShapeId, WorldId)
-import Web.Box2D qualified as Physics
-import Web.Canvas
-import Web.Frame
-import Web.Input
-
-fi :: forall a b. (Integral a, Num b) => a -> b
-fi = fromIntegral
+import Box2D qualified
+import Control.Lens hiding (universe, view, (#))
+import Data.IntSet qualified as IntSet
+import Data.Map qualified as Map
+import Linear (R2 (_y), V2 (..), (^*))
+import Miso (App, Component (mount, subs), DecodeTarget (..), Decoder (..), Effect, Phase (BUBBLE), View, component, defaultEvents, io, on, startApp)
+import Miso.CSS.Color (Color, rgb)
+import Miso.Canvas (Canvas)
+import Miso.Canvas qualified as Canvas
+import Miso.Html.Property (height_, width_)
+import Miso.JSON (withArray, withObject, (.:))
+import Miso.String (ms)
+import Miso.Subscription.Keyboard (keyboardSub)
+import Miso.Subscription.RAF (rAFSub)
+import Relude hiding (on)
 
 -- | Box2D is y-up, the screen is y-down.
-flipY :: V2 Float -> V2 Float
+flipY :: V2 Double -> V2 Double
 flipY (V2 x y) = V2 x (-y)
 
-v2 :: Float -> Float -> V2 Float
+v2 :: Double -> Double -> V2 Double
 v2 x y = V2 x (-y)
 
-data Player = Player
-  { _playerBodyID :: BodyId
-  , _playerShapeID :: ShapeId
+data Physics = Physics
+  { _world :: Box2D.World
+  , _player :: Box2D.Body
   }
+  deriving stock (Eq)
 
-data GaTarget = GaTarget
-  { _gaTargetVisible :: Bool
-  , _gaTargetPosition :: V2 Float
+data Model = Model
+  { _physics :: Maybe Physics
+  -- ^ Set up when the game starts.
+  , _playerPosition :: V2 Double
+  , _gaTargets :: [V2 Double]
+  , _keysDown :: IntSet
+  , _mousePosition :: V2 Double
+  , _lastFrame :: Double
+  -- ^ Timestamp of the last frame, in milliseconds.
   }
-  deriving stock (Show)
+  deriving stock (Eq)
 
-data World = World
-  { _physicsWorldID :: WorldId
-  , _worldPlayer :: Player
-  , _worldGaTargets :: [GaTarget]
-  }
+data Msg
+  = Start
+  | Started Physics
+  | Frame Double
+  | Stepped Double (V2 Double)
+  | KeysDown IntSet
+  | MouseMoved (V2 Double)
 
 data Action = MoveLeft | MoveRight | Jump | GetPos
   deriving stock (Eq, Show, Enum, Bounded)
 
-data Trigger = OnDown | OnPressed | OnReleased
+$(makeLenses ''Physics)
+$(makeLenses ''Model)
 
-$(makeFields ''Player)
-$(makeFields ''GaTarget)
-$(makeFields ''World)
+-- | The key code that triggers each action while held.
+keyBinding :: Action -> Int
+keyBinding MoveLeft = 65 -- A
+keyBinding MoveRight = 68 -- D
+keyBinding Jump = 32 -- Space
+keyBinding GetPos = 80 -- P
 
-windowWidth, windowHeight :: Int
-windowWidth = 1920
-windowHeight = 1080
+screenWidth, screenHeight :: Double
+screenWidth = 1920
+screenHeight = 1080
 
-playerHeight :: Float
-playerHeight = 80
-
-gravityAccel :: Float
+gravityAccel :: Double
 gravityAccel = 10
 
-playerOrigin :: V2 Float
+playerOrigin :: V2 Double
 playerOrigin = V2 585 500
 
-gray, pink, red, green, brown, black :: JSString
-gray = toJSString "rgb(130 130 130)"
-pink = toJSString "rgb(255 109 194)"
-red = toJSString "rgb(230 41 55)"
-green = toJSString "rgb(0 228 48)"
-brown = toJSString "rgb(127 106 79)"
-black = toJSString "rgb(0 0 0)"
+gray, pink, red, green, brown, black :: Color
+gray = rgb 130 130 130
+pink = rgb 255 109 194
+red = rgb 230 41 55
+green = rgb 0 228 48
+brown = rgb 127 106 79
+black = rgb 0 0 0
 
-checkAction :: Input -> Action -> IO Bool
-checkAction input a = case keyBinding a of
-  (key, OnDown) -> isKeyDown input key
-  (key, OnPressed) -> isKeyPressed input key
-  (key, OnReleased) -> isKeyReleased input key
+initialModel :: Model
+initialModel =
+  Model
+    { _physics = Nothing
+    , _playerPosition = playerOrigin
+    , _gaTargets = liftA2 V2 (coord 8 (-2000)) (coord 50 300)
+    , _keysDown = mempty
+    , _mousePosition = V2 0 0
+    , _lastFrame = 0
+    }
   where
-    keyBinding :: Action -> (Text, Trigger)
-    keyBinding MoveLeft = ("KeyA", OnDown)
-    keyBinding MoveRight = ("KeyD", OnDown)
-    keyBinding Jump = ("Space", OnDown)
-    keyBinding GetPos = ("KeyP", OnDown)
+    coord n start = map ((start +) . (* 400)) [0 .. n - 1]
 
-applyAction :: Input -> World -> Action -> IO ()
-applyAction _ w MoveLeft = Physics.applyForceToCenter (w ^. player . bodyID) (v2 (-3000) 0) True
-applyAction _ w MoveRight = Physics.applyForceToCenter (w ^. player . bodyID) (v2 3000 0) True
-applyAction _ w Jump = Physics.applyForceToCenter (w ^. player . bodyID) (v2 0 (-9000)) True
-applyAction input _ GetPos = print =<< getMousePosition input
-
-startup :: IO World
+startup :: IO Physics
 startup = do
-  physicsWorldID <- Physics.createWorld (V2 0 (-gravityAccel))
-  groundBodyID <- Physics.createBody physicsWorldID StaticBody (V2 0 0)
-  _groundID <- Physics.createSegment groundBodyID (v2 (-999) 1000) (v2 999 1000)
-  body <- Physics.createBody physicsWorldID DynamicBody (flipY playerOrigin)
-  shape <- Physics.createCircle body (v2 0 0) 10
-  Physics.setRestitution shape 0.8
+  world' <- Box2D.createWorld (V2 0 (-gravityAccel))
+  ground <- Box2D.createBody world' Box2D.StaticBody (V2 0 0)
+  _ <- Box2D.createSegment ground (v2 (-999) 1000) (v2 999 1000)
+  body <- Box2D.createBody world' Box2D.DynamicBody (flipY playerOrigin)
+  shape <- Box2D.createCircle body (v2 0 0) 10
+  Box2D.setRestitution shape 0.8
+  pure (Physics world' body)
 
-  let spacing :: Float = 400
-      coord n start = map ((start +) . (* spacing)) [0 .. n - 1]
-      gaTargets' = liftA2 V2 (coord 8 (-2000)) (coord 50 300) & map (GaTarget True)
+applyAction :: Physics -> V2 Double -> Action -> IO ()
+applyAction p _ MoveLeft = Box2D.applyForceToCenter (p ^. player) (v2 (-3000) 0)
+applyAction p _ MoveRight = Box2D.applyForceToCenter (p ^. player) (v2 3000 0)
+applyAction p _ Jump = Box2D.applyForceToCenter (p ^. player) (v2 0 (-9000))
+applyAction _ mouse GetPos = print mouse
 
-  pure $ World physicsWorldID (Player body shape) gaTargets'
+update :: Msg -> Effect () () Model Msg
+update = \case
+  Start -> io (Started <$> startup)
+  Started p -> physics ?= p
+  KeysDown keys -> keysDown .= keys
+  MouseMoved position -> mousePosition .= position
+  Frame time -> do
+    model <- get
+    for_ (model ^. physics) $ \p -> do
+      -- In seconds, capped so a backgrounded tab doesn't cause one huge step.
+      let dt = min 0.05 ((time - model ^. lastFrame) / 1000)
+          actions = filter (\a -> IntSet.member (keyBinding a) (model ^. keysDown)) universe
+      io $ do
+        traverse_ (applyAction p (model ^. mousePosition)) actions
+        Box2D.step (p ^. world) (dt * 10) 4
+        Stepped time . flipY <$> Box2D.getPosition (p ^. player)
+  Stepped time position -> do
+    lastFrame .= time
+    playerPosition .= position
 
-mainLoop :: Context -> Input -> Float -> World -> IO World
-mainLoop ctx input dt world = do
-  actions <- filterM (checkAction input) universe
-  mousePosition <- getMousePosition input
+view :: Model -> View () () Model Msg
+view model =
+  Canvas.canvas
+    [ width_ (ms screenWidth)
+    , height_ (ms screenHeight)
+    , on "pointermove" canvasPointer (\position _ _ -> MouseMoved position)
+    ]
+    (\_ -> pure ())
+    (\() -> draw model)
 
-  traverse_ (applyAction input world) actions
-  Physics.step world._physicsWorldID (dt * 10) 4
+draw :: Model -> Canvas ()
+draw model = do
+  let ppos = model ^. playerPosition
+  fillRect gray (V2 0 0) (V2 screenWidth screenHeight)
+  fillCircle pink (model ^. mousePosition) 100
+  fillCircle red playerOrigin 30
+  fillText black 20 (V2 20 20) ("Player height: " <> show (round (negate (ppos ^. _y)) :: Int))
+  fillRect black (V2 (screenWidth / 2) (screenHeight / 2)) (V2 200 200)
+  for_ (model ^. gaTargets) $ \target -> fillCircle brown target 10
+  strokeLine black 4 (V2 (-999) 1000) (V2 999 1000)
+  fillCircle green ppos 10
+  fillText black 20 (ppos - V2 17 20) "PLAYER"
+  fillText black 18 (V2 30 40) "Basic canvas window"
 
-  ppos <- flipY <$> Physics.getPosition (world ^. player . bodyID)
+{- | The pointer position in canvas pixels, from a pointer event on the canvas.
+The page scales the canvas with CSS, so the event's offset is scaled back.
+-}
+canvasPointer :: Decoder (V2 Double)
+canvasPointer =
+  Decoder
+    { decodeAt = DecodeTargets [[], ["target"]]
+    , decoder = withArray "[event, canvas]" $ \case
+        [event, canvas] -> do
+          offset <- withObject "event" (\e -> V2 <$> e .: "offsetX" <*> e .: "offsetY") event
+          scale <- withObject "canvas" (\c -> (/) <$> c .: "width" <*> c .: "clientWidth") canvas
+          pure (offset ^* scale)
+        _ -> fail "expected the event and its target"
+    }
 
-  let
-    drawPlayerSprite = do
-      fillCircle ctx green ppos 10
-      fillText ctx black 20 (V2 (ppos ^. _x - 17) (ppos ^. _y - 20)) "PLAYER"
+fillRect :: Color -> V2 Double -> V2 Double -> Canvas ()
+fillRect color (V2 x y) (V2 w h) = do
+  Canvas.fillStyle (Canvas.color color)
+  Canvas.fillRect (x, y, w, h)
 
-    drawGround = strokeLine ctx black 4 (V2 (-999) 1000) (V2 999 1000)
+fillCircle :: Color -> V2 Double -> Double -> Canvas ()
+fillCircle color (V2 x y) radius = do
+  Canvas.fillStyle (Canvas.color color)
+  Canvas.beginPath ()
+  Canvas.arc (x, y, radius, 0, 2 * pi)
+  Canvas.fill ()
 
-  fillRect ctx gray (V2 0 0) (fi <$> V2 windowWidth windowHeight)
-  fillCircle ctx pink mousePosition 100
-  fillCircle ctx red playerOrigin 30
-  fillText ctx black 20 (V2 20 20) ("Player height: " <> show (round $ ppos ^. _y & negate :: Int))
+strokeLine :: Color -> Double -> V2 Double -> V2 Double -> Canvas ()
+strokeLine color width (V2 x1 y1) (V2 x2 y2) = do
+  Canvas.strokeStyle (Canvas.color color)
+  Canvas.lineWidth width
+  Canvas.beginPath ()
+  Canvas.moveTo (x1, y1)
+  Canvas.lineTo (x2, y2)
+  Canvas.stroke ()
 
-  fillRect ctx black (fi <$> V2 (div windowWidth 2) (div windowHeight 2)) (V2 200 200)
-  traverse_ (\gaTarget -> fillCircle ctx brown (gaTarget ^. position) 10) (world ^. gaTargets)
-  drawGround
-  drawPlayerSprite
-  fillText ctx black 18 (V2 30 40) "Basic canvas window"
+fillText :: Color -> Int -> V2 Double -> Text -> Canvas ()
+fillText color size (V2 x y) text = do
+  Canvas.fillStyle (Canvas.color color)
+  Canvas.font (ms size <> "px monospace")
+  Canvas.textBaseline Canvas.TextBaselineTop
+  Canvas.fillText (ms text, x, y)
 
-  pure world
-
--- | Called from web/index.html once the wasm module is loaded.
 main :: IO ()
-main = do
-  Physics.loadBox2D
-  ctx <- getContext
-  input <- newInput
-  let loop t world = do
-        t' <- nextFrame
-        -- Clamped so a backgrounded tab doesn't hand the physics a huge step.
-        world' <- mainLoop ctx input (realToFrac (min 0.05 (t' - t))) world
-        endFrame input
-        loop t' world'
-  join $ loop <$> nextFrame <*> startup
+main = startApp (Map.insert "pointermove" BUBBLE defaultEvents) app
 
+app :: App Model Msg
+app = (component initialModel update view){subs = [rAFSub Frame, keyboardSub KeysDown], mount = Just Start}
+
+#ifdef wasm32_HOST_ARCH
+-- | web/index.html calls this once the module is loaded.
 foreign export javascript "start" main :: IO ()
+#endif

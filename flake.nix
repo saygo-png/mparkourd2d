@@ -10,7 +10,13 @@
       url = "path:./nix/systems.nix";
       flake = false;
     };
-    # JS libraries the page loads; bump versions by editing the URLs.
+    # miso isn't on GitHub past 1.9 and nixpkgs has an old one; bump versions
+    # by editing the URLs.
+    miso = {
+      url = "https://hackage.haskell.org/package/miso-1.14.0.0/miso-1.14.0.0.tar.gz";
+      flake = false;
+    };
+    # JS libraries the page loads.
     box2d3-wasm = {
       url = "https://registry.npmjs.org/box2d3-wasm/-/box2d3-wasm-5.2.0.tgz";
       flake = false;
@@ -27,8 +33,20 @@
     treefmt-nix,
     ...
   } @ inputs: let
-    eachSystem = f: nixpkgs.lib.genAttrs (import systems) (system: f nixpkgs.legacyPackages.${system});
-    wasmHaskellPackages = pkgs: pkgs.callPackage ./nix/wasm-haskell.nix {inherit (inputs) ghc-wasm-meta;};
+    inherit (nixpkgs) lib;
+    eachSystem = f: lib.genAttrs (import systems) (system: f nixpkgs.legacyPackages.${system});
+
+    # The game and miso, added to a Haskell package set: the wasm one for the
+    # build, a native one for HLS.
+    localPackages = self: _: {
+      # template-haskell for Miso.FFI.QQ, as in cabal.project.
+      miso = self.callCabal2nixWithOptions "miso" inputs.miso "-ftemplate-haskell" {};
+      mparkour2d = self.callCabal2nix "mparkour2d" (lib.fileset.toSource {
+        root = ./.;
+        fileset = lib.fileset.unions [./mparkour2d.cabal ./src];
+      }) {};
+    };
+    wasmHaskellPackages = pkgs: (pkgs.callPackage ./nix/wasm-haskell.nix {inherit (inputs) ghc-wasm-meta;}).extend localPackages;
   in {
     # `nix run` serves the game on http://localhost:8000 (`nix run . -- PORT` for another port).
     packages = eachSystem (pkgs: {
@@ -38,10 +56,16 @@
       };
     });
 
-    # wasm32-wasi-ghc and wasm32-wasi-cabal, for compiling with cabal directly.
-    devShells = eachSystem (pkgs: {
-      default = pkgs.mkShell {
-        packages = [
+    # Native GHC 9.12 with the game's dependencies, cabal and HLS, for working
+    # on the game. Also wasm32-wasi-ghc and wasm32-wasi-cabal for the wasm side.
+    devShells = eachSystem (pkgs: let
+      native = pkgs.haskell.packages.ghc912.extend localPackages;
+    in {
+      default = native.shellFor {
+        packages = p: [p.mparkour2d];
+        nativeBuildInputs = [
+          native.haskell-language-server
+          pkgs.cabal-install
           (wasmHaskellPackages pkgs).ghc
           (pkgs.callPackage "${inputs.ghc-wasm-meta}/pkgs/wasm32-wasi-cabal.nix" {flavour = "9.12";})
         ];
