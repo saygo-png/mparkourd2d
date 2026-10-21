@@ -9,10 +9,11 @@ import Control.Lens hiding (universe, view, (#))
 import Data.IntSet qualified as IntSet
 import Data.Map qualified as Map
 import Linear (R2 (_y), V2 (..), (^*))
-import Miso (App, Component (mount, subs), DecodeTarget (..), Decoder (..), Effect, Phase (BUBBLE), View, component, defaultEvents, io, on, startApp)
+import Miso (App, Attribute, Component (mount, subs), DecodeTarget (..), Decoder (..), Effect, Phase (BUBBLE), View, component, defaultEvents, io, noop, on, startApp, sync, (+>))
 import Miso.CSS.Color (Color, rgb)
 import Miso.Canvas (Canvas)
 import Miso.Canvas qualified as Canvas
+import Miso.Html.Element (div_)
 import Miso.Html.Property (height_, width_)
 import Miso.JSON (withArray, withObject, (.:))
 import Miso.String (ms)
@@ -37,7 +38,6 @@ data Model = Model
   { _physics :: Maybe Physics
   -- ^ Set up when the game starts.
   , _playerPosition :: V2 Double
-  , _gaTargets :: [V2 Double]
   , _keysDown :: IntSet
   , _mousePosition :: V2 Double
   , _lastFrame :: Double
@@ -89,11 +89,13 @@ initialModel =
   Model
     { _physics = Nothing
     , _playerPosition = playerOrigin
-    , _gaTargets = liftA2 V2 (coord 8 (-2000)) (coord 50 300)
     , _keysDown = mempty
     , _mousePosition = V2 0 0
     , _lastFrame = 0
     }
+
+gaTargets :: [V2 Double]
+gaTargets = liftA2 V2 (coord 8 (-2000)) (coord 50 300)
   where
     coord n start = map ((start +) . (* 400)) [0 .. n - 1]
 
@@ -125,7 +127,8 @@ update = \case
       -- In seconds, capped so a backgrounded tab doesn't cause one huge step.
       let dt = min 0.05 ((time - model ^. lastFrame) / 1000)
           actions = filter (\a -> IntSet.member (keyBinding a) (model ^. keysDown)) universe
-      io $ do
+      -- sync, not io: io runs it in a new thread, which is slow every frame.
+      sync $ do
         traverse_ (applyAction p (model ^. mousePosition)) actions
         Box2D.step (p ^. world) (dt * 10) 4
         Stepped time . flipY <$> Box2D.getPosition (p ^. player)
@@ -133,29 +136,45 @@ update = \case
     lastFrame .= time
     playerPosition .= position
 
+{- | Canvases stacked on top of each other (see web/index.html). The scenery
+never changes, so it is its own component, which miso draws only once; the
+layers below and above it are redrawn every frame.
+-}
 view :: Model -> View () () Model Msg
 view model =
-  Canvas.canvas
-    [ width_ (ms screenWidth)
-    , height_ (ms screenHeight)
-    , on "pointermove" canvasPointer (\position _ _ -> MouseMoved position)
+  div_
+    []
+    [ layer [] (drawBelow model)
+    , "scenery" +> scenery
+    , layer [on "pointermove" canvasPointer (\position _ _ -> MouseMoved position)] (drawAbove model)
     ]
-    (\_ -> pure ())
-    (\() -> draw model)
 
-draw :: Model -> Canvas ()
-draw model = do
-  let ppos = model ^. playerPosition
+scenery :: Component () () () ()
+scenery = component () noop (\() -> layer [] drawScenery)
+
+layer :: [Attribute model action] -> Canvas () -> View context props model action
+layer attributes draw = Canvas.canvas (width_ (ms screenWidth) : height_ (ms screenHeight) : attributes) (\_ -> pass) (\() -> draw)
+
+drawBelow :: Model -> Canvas ()
+drawBelow model = do
   fillRect gray (V2 0 0) (V2 screenWidth screenHeight)
   fillCircle pink (model ^. mousePosition) 100
+
+drawScenery :: Canvas ()
+drawScenery = do
   fillCircle red playerOrigin 30
-  fillText black 20 (V2 20 20) ("Player height: " <> show (round (negate (ppos ^. _y)) :: Int))
   fillRect black (V2 (screenWidth / 2) (screenHeight / 2)) (V2 200 200)
-  for_ (model ^. gaTargets) $ \target -> fillCircle brown target 10
+  for_ gaTargets $ \target -> fillCircle brown target 10
   strokeLine black 4 (V2 (-999) 1000) (V2 999 1000)
+  fillText black 18 (V2 30 40) "Basic canvas window"
+
+drawAbove :: Model -> Canvas ()
+drawAbove model = do
+  let ppos = model ^. playerPosition
+  Canvas.clearRect (0, 0, screenWidth, screenHeight)
+  fillText black 20 (V2 20 20) ("Player height: " <> show (round (negate (ppos ^. _y)) :: Int))
   fillCircle green ppos 10
   fillText black 20 (ppos - V2 17 20) "PLAYER"
-  fillText black 18 (V2 30 40) "Basic canvas window"
 
 {- | The pointer position in canvas pixels, from a pointer event on the canvas.
 The page scales the canvas with CSS, so the event's offset is scaled back.
