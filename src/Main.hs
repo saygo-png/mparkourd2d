@@ -8,8 +8,8 @@ import Box2D qualified
 import Control.Lens hiding (universe, view, (#))
 import Data.IntSet qualified as IntSet
 import Data.Map qualified as Map
-import Linear (R2 (_y), V2 (..), (^*))
-import Miso (App, Attribute, Component (mount, subs), DecodeTarget (..), Decoder (..), Effect, Phase (BUBBLE), View, component, defaultEvents, io, noop, on, startApp, sync, (+>))
+import Linear (R2 (_y), V2 (..), distance, normalize, (*^), (^*), (^/))
+import Miso (App, Attribute, Component (mount, subs), DecodeTarget (..), Decoder (..), Effect, Phase (BUBBLE), View, component, defaultEvents, io, noop, on, startApp, sync, sync_, (+>))
 import Miso.CSS.Color (Color, rgb)
 import Miso.Canvas (Canvas)
 import Miso.Canvas qualified as Canvas
@@ -34,14 +34,28 @@ data Physics = Physics
   }
   deriving stock (Eq)
 
+-- | The GA: a dash to the target nearest the mouse.
+data GaPhase
+  = GaReady
+  | -- | To this target.
+    GaDashing (V2 Double)
+  | -- | For this many more seconds.
+    GaArrived Double
+  deriving stock (Eq)
+
 data Model = Model
   { _physics :: Maybe Physics
   -- ^ Set up when the game starts.
   , _playerPosition :: V2 Double
+  , _gaPhase :: GaPhase
+  , _gaCooldown :: Double
+  -- ^ Seconds until the GA can be used again.
   , _keysDown :: IntSet
   , _mousePosition :: V2 Double
   , _lastFrame :: Double
   -- ^ Timestamp of the last frame, in milliseconds.
+  , _fps :: Double
+  -- ^ Frames per second, smoothed.
   }
   deriving stock (Eq)
 
@@ -53,7 +67,7 @@ data Msg
   | KeysDown IntSet
   | MouseMoved (V2 Double)
 
-data Action = MoveLeft | MoveRight | Jump | GetPos
+data Action = MoveLeft | MoveRight | Jump | GetPos | GaStart
   deriving stock (Eq, Show, Enum, Bounded)
 
 $(makeLenses ''Physics)
@@ -65,6 +79,7 @@ keyBinding MoveLeft = 65 -- A
 keyBinding MoveRight = 68 -- D
 keyBinding Jump = 32 -- Space
 keyBinding GetPos = 80 -- P
+keyBinding GaStart = 16 -- Shift
 
 screenWidth, screenHeight :: Double
 screenWidth = 1920
@@ -73,15 +88,28 @@ screenHeight = 1080
 gravityAccel :: Double
 gravityAccel = 10
 
+-- | Physics runs this many times faster than real time.
+timeScale :: Double
+timeScale = 10
+
+gaLockonRange, gaCooldownTime, gaDashSpeed, gaArrivalThreshold, gaArrivedDuration, gaJumpSpeed :: Double
+gaLockonRange = 100 -- The pink circle around the mouse.
+gaCooldownTime = 3
+gaDashSpeed = 700 -- Pixels per second.
+gaArrivalThreshold = 40
+gaArrivedDuration = 0.3
+gaJumpSpeed = 2000 -- Pixels per second.
+
 playerOrigin :: V2 Double
 playerOrigin = V2 585 500
 
-gray, pink, red, green, brown, black :: Color
+gray, pink, red, green, brown, darkBrown, black :: Color
 gray = rgb 130 130 130
 pink = rgb 255 109 194
 red = rgb 230 41 55
 green = rgb 0 228 48
 brown = rgb 127 106 79
+darkBrown = rgb 76 63 47
 black = rgb 0 0 0
 
 initialModel :: Model
@@ -89,15 +117,28 @@ initialModel =
   Model
     { _physics = Nothing
     , _playerPosition = playerOrigin
+    , _gaPhase = GaReady
+    , _gaCooldown = 0
     , _keysDown = mempty
     , _mousePosition = V2 0 0
     , _lastFrame = 0
+    , _fps = 0
     }
 
 gaTargets :: [V2 Double]
 gaTargets = liftA2 V2 (coord 8 (-2000)) (coord 50 300)
   where
     coord n start = map ((start +) . (* 400)) [0 .. n - 1]
+
+-- | The target the GA would dash to: the one nearest the mouse, if it's in range.
+gaTarget :: Model -> Maybe (V2 Double)
+gaTarget model =
+  gaTargets
+    & filter ((<= gaLockonRange) . distance mouse)
+    & sortOn (distance mouse)
+    & viaNonEmpty head
+  where
+    mouse = model ^. mousePosition
 
 startup :: IO Physics
 startup = do
@@ -109,11 +150,30 @@ startup = do
   Box2D.setRestitution shape 0.8
   pure (Physics world' body)
 
-applyAction :: Physics -> V2 Double -> Action -> IO ()
-applyAction p _ MoveLeft = Box2D.applyForceToCenter (p ^. player) (v2 (-3000) 0)
-applyAction p _ MoveRight = Box2D.applyForceToCenter (p ^. player) (v2 3000 0)
-applyAction p _ Jump = Box2D.applyForceToCenter (p ^. player) (v2 0 (-9000))
-applyAction _ mouse GetPos = print mouse
+-- | Sets the player's velocity, in pixels per second on the screen.
+setVelocity :: Physics -> V2 Double -> IO ()
+setVelocity p velocity = Box2D.setLinearVelocity (p ^. player) (flipY velocity ^/ timeScale)
+
+applyAction :: Physics -> Action -> Effect () () Model Msg
+applyAction p action = do
+  model <- get
+  let ready = model ^. gaPhase == GaReady
+      push = when ready . sync_ . Box2D.applyForceToCenter (p ^. player)
+  case action of
+    MoveLeft -> push (v2 (-3000) 0)
+    MoveRight -> push (v2 3000 0)
+    Jump
+      | ready -> push (v2 0 (-9000))
+      -- Jumping out of the GA launches the player towards the mouse.
+      | otherwise -> do
+          sync_ (setVelocity p (gaJumpSpeed *^ normalize (model ^. mousePosition - model ^. playerPosition)))
+          gaPhase .= GaReady
+    GetPos -> sync_ (print (model ^. mousePosition))
+    GaStart -> case gaTarget model of
+      Just target | ready && model ^. gaCooldown <= 0 -> do
+        gaPhase .= GaDashing target
+        gaCooldown .= gaCooldownTime
+      _ -> pass
 
 update :: Msg -> Effect () () Model Msg
 update = \case
@@ -127,14 +187,30 @@ update = \case
       -- In seconds, capped so a backgrounded tab doesn't cause one huge step.
       let dt = min 0.05 ((time - model ^. lastFrame) / 1000)
           actions = filter (\a -> IntSet.member (keyBinding a) (model ^. keysDown)) universe
+      gaCooldown %= max 0 . subtract dt
+      gaPhase %= \case
+        GaArrived remaining | remaining > dt -> GaArrived (remaining - dt)
+        GaArrived _ -> GaReady
+        phase -> phase
+      traverse_ (applyAction p) actions
+      phase <- use gaPhase
       -- sync, not io: io runs it in a new thread, which is slow every frame.
       sync $ do
-        traverse_ (applyAction p (model ^. mousePosition)) actions
-        Box2D.step (p ^. world) (dt * 10) 4
+        case phase of
+          GaDashing target -> do
+            Box2D.setGravityScale (p ^. player) 0
+            setVelocity p (gaDashSpeed *^ normalize (target - model ^. playerPosition))
+          _ -> Box2D.setGravityScale (p ^. player) 1
+        Box2D.step (p ^. world) (dt * timeScale) 4
         Stepped time . flipY <$> Box2D.getPosition (p ^. player)
   Stepped time position -> do
+    frameTime <- (time -) <$> use lastFrame
+    fps %= \f -> 0.9 * f + 0.1 * (1000 / frameTime)
     lastFrame .= time
     playerPosition .= position
+    gaPhase %= \case
+      GaDashing target | distance position target <= gaArrivalThreshold -> GaArrived gaArrivedDuration
+      phase -> phase
 
 {- | Canvases stacked on top of each other (see web/index.html). The scenery
 never changes, so it is its own component, which miso draws only once; the
@@ -158,7 +234,7 @@ layer attributes draw = Canvas.canvas (width_ (ms screenWidth) : height_ (ms scr
 drawBelow :: Model -> Canvas ()
 drawBelow model = do
   fillRect gray (V2 0 0) (V2 screenWidth screenHeight)
-  fillCircle pink (model ^. mousePosition) 100
+  fillCircle pink (model ^. mousePosition) gaLockonRange
 
 drawScenery :: Canvas ()
 drawScenery = do
@@ -173,8 +249,19 @@ drawAbove model = do
   let ppos = model ^. playerPosition
   Canvas.clearRect (0, 0, screenWidth, screenHeight)
   fillText black 20 (V2 20 20) ("Player height: " <> show (round (negate (ppos ^. _y)) :: Int))
+  fillText black 20 (V2 20 65) (gaStatus model)
+  fillTextRight black 20 (V2 (screenWidth - 20) 20) ("FPS: " <> show (round (model ^. fps) :: Int))
+  for_ (gaTarget model) $ \target -> strokeLine darkBrown 4 (model ^. mousePosition) target
   fillCircle green ppos 10
   fillText black 20 (ppos - V2 17 20) "PLAYER"
+
+gaStatus :: Model -> Text
+gaStatus model = case model ^. gaPhase of
+  GaReady
+    | model ^. gaCooldown > 0 -> "GA cooldown: " <> show (round (model ^. gaCooldown) :: Int) <> "s"
+    | otherwise -> "GA ready"
+  GaDashing _ -> "GA dashing"
+  GaArrived _ -> "GA arrived"
 
 {- | The pointer position in canvas pixels, from a pointer event on the canvas.
 The page scales the canvas with CSS, so the event's offset is scaled back.
@@ -212,10 +299,19 @@ strokeLine color width (V2 x1 y1) (V2 x2 y2) = do
   Canvas.lineTo (x2, y2)
   Canvas.stroke ()
 
+-- | Text with its top left corner at the position.
 fillText :: Color -> Int -> V2 Double -> Text -> Canvas ()
-fillText color size (V2 x y) text = do
+fillText = fillTextAligned Canvas.TextAlignLeft
+
+-- | Text with its top right corner at the position.
+fillTextRight :: Color -> Int -> V2 Double -> Text -> Canvas ()
+fillTextRight = fillTextAligned Canvas.TextAlignRight
+
+fillTextAligned :: Canvas.TextAlignType -> Color -> Int -> V2 Double -> Text -> Canvas ()
+fillTextAligned align color size (V2 x y) text = do
   Canvas.fillStyle (Canvas.color color)
   Canvas.font (ms size <> "px monospace")
+  Canvas.textAlign align
   Canvas.textBaseline Canvas.TextBaselineTop
   Canvas.fillText (ms text, x, y)
 

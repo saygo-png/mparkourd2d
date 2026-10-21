@@ -15,6 +15,8 @@ module Box2D (
   step,
   createBody,
   applyForceToCenter,
+  setLinearVelocity,
+  setGravityScale,
   getPosition,
   createSegment,
   createCircle,
@@ -75,6 +77,17 @@ applyForceToCenter body (V2 x y) =
     b2.b2Body_ApplyForceToCenter(${body}, f, true);
     f.delete();
   |]
+
+setLinearVelocity :: Body -> V2 Double -> IO ()
+setLinearVelocity body (V2 x y) =
+  [js|
+    const v = new b2.b2Vec2(${x}, ${y});
+    b2.b2Body_SetLinearVelocity(${body}, v);
+    v.delete();
+  |]
+
+setGravityScale :: Body -> Double -> IO ()
+setGravityScale body scale = [js| b2.b2Body_SetGravityScale(${body}, ${scale}); |]
 
 getPosition :: Body -> IO (V2 Double)
 getPosition body = do

@@ -10,7 +10,9 @@ nix run . -- 8080    # another port
 ```
 
 Controls: `A`/`D` push left and right, `Space` pushes up, `P` prints the mouse
-position to the browser console.
+position to the browser console. `Shift` uses the GA: a dash to the target
+(brown dot) nearest the mouse, within the pink circle. It has a 3 second
+cooldown, and `Space` during it jumps out towards the mouse.
 
 ## How it works
 
@@ -46,21 +48,25 @@ with `${x}` replaced by the Haskell value `x`, and converts what it returns to
 the function's result type:
 
 ```haskell
-setLinearVelocity :: Body -> V2 Double -> IO ()
-setLinearVelocity body (V2 x y) =
+applyLinearImpulseToCenter :: Body -> V2 Double -> IO ()
+applyLinearImpulseToCenter body (V2 x y) =
   [js|
-    const v = new b2.b2Vec2(${x}, ${y});
-    b2.b2Body_SetLinearVelocity(${body}, v);
-    v.delete();
+    const i = new b2.b2Vec2(${x}, ${y});
+    b2.b2Body_ApplyLinearImpulseToCenter(${body}, i, true);
+    i.delete();
   |]
 ```
 
 Box2D's vectors and definitions are Emscripten objects; `.delete()` the ones you
-create. The JS API mirrors Box2D's C API (`b2Body_SetLinearVelocity(bodyId,
-velocity)`), see the [Box2D docs](https://box2d.org/documentation/).
+create. The JS API mirrors Box2D's C API (`b2Body_ApplyLinearImpulseToCenter(bodyId,
+impulse, wake)`), see the [Box2D docs](https://box2d.org/documentation/).
 
-Call it from `update` inside `io`, which runs `IO` and turns its result into the
-next `Msg`.
+Call it from `update` inside `sync_`, which runs `IO` after the update. `sync`
+and `io` also turn the result into the next `Msg`; `io` runs it in a new
+thread, which is too slow for every frame.
+
+The physics runs `timeScale` (10) times faster than real time, so velocities
+in Box2D are a tenth of the speed on screen; `setVelocity` in `Main.hs` converts.
 
 ## Developing
 
