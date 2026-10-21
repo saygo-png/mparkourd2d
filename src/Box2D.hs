@@ -23,7 +23,7 @@ module Box2D (
   setRestitution,
 ) where
 
-import Linear (V2 (..))
+import Data.Vector.V2 (Vector2 (..))
 import Miso.DSL (JSVal, ToJSVal)
 import Miso.FFI.QQ (js)
 import Relude
@@ -40,8 +40,8 @@ newtype Shape = Shape JSVal
 data BodyType = StaticBody | KinematicBody | DynamicBody
   deriving stock (Enum)
 
-createWorld :: V2 Double -> IO World
-createWorld (V2 gravityX gravityY) =
+createWorld :: Vector2 -> IO World
+createWorld (Vector2 gravityX gravityY) =
   World
     <$> [js|
       const d = b2.b2DefaultWorldDef(), g = new b2.b2Vec2(${gravityX}, ${gravityY});
@@ -56,8 +56,8 @@ createWorld (V2 gravityX gravityY) =
 step :: World -> Double -> Int -> IO ()
 step world timeStep subSteps = [js| b2.b2World_Step(${world}, ${timeStep}, ${subSteps}); |]
 
-createBody :: World -> BodyType -> V2 Double -> IO Body
-createBody world bodyType (V2 x y) =
+createBody :: World -> BodyType -> Vector2 -> IO Body
+createBody world bodyType (Vector2 x y) =
   let typeIndex = fromEnum bodyType
    in Body
         <$> [js|
@@ -70,16 +70,16 @@ createBody world bodyType (V2 x y) =
           return b;
         |]
 
-applyForceToCenter :: Body -> V2 Double -> IO ()
-applyForceToCenter body (V2 x y) =
+applyForceToCenter :: Body -> Vector2 -> IO ()
+applyForceToCenter body (Vector2 x y) =
   [js|
     const f = new b2.b2Vec2(${x}, ${y});
     b2.b2Body_ApplyForceToCenter(${body}, f, true);
     f.delete();
   |]
 
-setLinearVelocity :: Body -> V2 Double -> IO ()
-setLinearVelocity body (V2 x y) =
+setLinearVelocity :: Body -> Vector2 -> IO ()
+setLinearVelocity body (Vector2 x y) =
   [js|
     const v = new b2.b2Vec2(${x}, ${y});
     b2.b2Body_SetLinearVelocity(${body}, v);
@@ -89,7 +89,7 @@ setLinearVelocity body (V2 x y) =
 setGravityScale :: Body -> Double -> IO ()
 setGravityScale body scale = [js| b2.b2Body_SetGravityScale(${body}, ${scale}); |]
 
-getPosition :: Body -> IO (V2 Double)
+getPosition :: Body -> IO (Vector2)
 getPosition body = do
   xy <-
     [js|
@@ -98,11 +98,11 @@ getPosition body = do
       return xy;
     |]
   case xy of
-    [x, y] -> pure (V2 x y)
+    [x, y] -> pure (Vector2 x y)
     _ -> error "b2Body_GetPosition didn't return a vector"
 
-createSegment :: Body -> V2 Double -> V2 Double -> IO Shape
-createSegment body (V2 x1 y1) (V2 x2 y2) =
+createSegment :: Body -> Vector2 -> Vector2 -> IO Shape
+createSegment body (Vector2 x1 y1) (Vector2 x2 y2) =
   Shape
     <$> [js|
       const d = b2.b2DefaultShapeDef(), s = new b2.b2Segment();
@@ -115,8 +115,8 @@ createSegment body (V2 x1 y1) (V2 x2 y2) =
     |]
 
 -- | @createCircle body center radius@, with the center relative to the body.
-createCircle :: Body -> V2 Double -> Double -> IO Shape
-createCircle body (V2 x y) radius =
+createCircle :: Body -> Vector2 -> Double -> IO Shape
+createCircle body (Vector2 x y) radius =
   Shape
     <$> [js|
       const d = b2.b2DefaultShapeDef(), c = new b2.b2Circle(), p = new b2.b2Vec2(${x}, ${y});

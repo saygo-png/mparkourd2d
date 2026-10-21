@@ -51,8 +51,8 @@ with `${x}` replaced by the Haskell value `x`, and converts what it returns to
 the function's result type:
 
 ```haskell
-applyLinearImpulseToCenter :: Body -> V2 Double -> IO ()
-applyLinearImpulseToCenter body (V2 x y) =
+applyLinearImpulseToCenter :: Body -> Vector2 -> IO ()
+applyLinearImpulseToCenter body (Vector2 x y) =
   [js|
     const i = new b2.b2Vec2(${x}, ${y});
     b2.b2Body_ApplyLinearImpulseToCenter(${body}, i, true);

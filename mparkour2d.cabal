@@ -29,9 +29,8 @@ executable mparkour2d
   main-is:        Main.hs
   other-modules:  Box2D
   build-depends:
+    , AC-Vector
     , containers
-    , lens
-    , linear
     , miso
     , relude
 
