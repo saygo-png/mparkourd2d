@@ -14,7 +14,10 @@
     root = ../.;
     fileset = lib.fileset.unions [../mparkour2d.cabal ../src];
   };
-  game = wasmHaskellPackages.callCabal2nix "mparkour2d" src {};
+  haskellPackages = wasmHaskellPackages.extend (self: _: {
+    web-game = self.callCabal2nix "web-game" ../web-game {};
+  });
+  game = haskellPackages.callCabal2nix "mparkour2d" src {};
 in
   runCommand "mparkour2d" {
     nativeBuildInputs = [wasmHaskellPackages.ghc nodejs makeWrapper];
@@ -24,7 +27,7 @@ in
     mkdir -p $site/vendor/box2d3-wasm $site/vendor/browser_wasi_shim
     cp ${../web/index.html} $site/index.html
     cp ${game}/bin/mparkour2d.wasm $site
-    # Generates the JS half of the game's `foreign import javascript`s.
+    # Generates the JS half of all `foreign import javascript`s (the game's and web-game's).
     "$(wasm32-wasi-ghc --print-libdir)/post-link.mjs" -i $site/mparkour2d.wasm -o $site/ghc_wasm_jsffi.js
     cp ${box2d3-wasm}/build/dist/es/compat/*.{mjs,wasm} $site/vendor/box2d3-wasm
     cp ${browser-wasi-shim}/dist/*.js $site/vendor/browser_wasi_shim

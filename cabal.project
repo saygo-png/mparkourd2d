@@ -1,3 +1,3 @@
-packages: .
+packages: . web-game
 optimization: 0
 documentation: True

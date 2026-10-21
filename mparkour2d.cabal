@@ -6,7 +6,7 @@ author:        saygo-png
 maintainer:    saygo-png <saygo.mail@proton.me>
 
 common common-options
-  build-depends:      containers, ghc-experimental, lens, linear, relude
+  build-depends:      ghc-experimental, lens, linear, relude, web-game
   default-language:   GHC2024
   ghc-options:
     -Weverything
@@ -34,10 +34,6 @@ executable mparkour2d
   import:         common-options
   hs-source-dirs: src
   main-is:        Main.hs
-  other-modules:
-    Physics
-    Canvas
-    Input
 
   -- A wasm module whose exported `start` (Main.main) web/index.html calls.
   ghc-options:    -no-hs-main -optl-mexec-model=reactor -optl-Wl,--export=start

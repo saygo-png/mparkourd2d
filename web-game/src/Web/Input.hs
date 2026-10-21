@@ -1,7 +1,7 @@
 {- | Keyboard and mouse state, kept up to date by DOM event listeners. Keys are
 @KeyboardEvent.code@ names such as "KeyA" or "Space".
 -}
-module Input (
+module Web.Input (
   Input,
   newInput,
   endFrame,
@@ -11,10 +11,14 @@ module Input (
   getMousePosition,
 ) where
 
+import Control.Monad (unless)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.Set (Set)
 import Data.Set qualified as Set
+import Data.Text (Text)
+import Data.Text qualified as Text
 import GHC.Wasm.Prim (JSString (..), JSVal, fromJSString, toJSString)
 import Linear (V2 (..))
-import Relude
 
 data Input = Input
   { down :: IORef (Set Text)
@@ -32,13 +36,22 @@ foreign import javascript unsafe "addEventListener($1, $2)"
 foreign import javascript unsafe "$1.code"
   js_code :: JSVal -> IO JSString
 
--- Pointer position in canvas pixels; CSS scales the canvas to the window.
-foreign import javascript unsafe "const c = document.querySelector('canvas'); return ($1.clientX - c.getBoundingClientRect().left) * c.width / c.clientWidth"
+-- Pointer position in canvas pixels; the page may scale the canvas with CSS.
+foreign import javascript unsafe
+  """
+  const c = document.querySelector('canvas');
+  return ($1.clientX - c.getBoundingClientRect().left) * c.width / c.clientWidth;
+  """
   js_canvasX :: JSVal -> IO Float
 
-foreign import javascript unsafe "const c = document.querySelector('canvas'); return ($1.clientY - c.getBoundingClientRect().top) * c.height / c.clientHeight"
+foreign import javascript unsafe
+  """
+  const c = document.querySelector('canvas');
+  return ($1.clientY - c.getBoundingClientRect().top) * c.height / c.clientHeight;
+  """
   js_canvasY :: JSVal -> IO Float
 
+-- | Starts listening for input events.
 newInput :: IO Input
 newInput = do
   input <- Input <$> newIORef mempty <*> newIORef mempty <*> newIORef mempty <*> newIORef (V2 0 0)
@@ -55,7 +68,7 @@ newInput = do
   where
     listen :: String -> (JSVal -> IO ()) -> IO ()
     listen event handler = js_addEventListener (toJSString event) =<< js_callback handler
-    code e = toText . fromJSString <$> js_code e
+    code e = Text.pack . fromJSString <$> js_code e
 
 -- | Forgets the presses and releases seen so far; call once per frame.
 endFrame :: Input -> IO ()
@@ -66,5 +79,6 @@ isKeyDown input key = Set.member key <$> readIORef input.down
 isKeyPressed input key = Set.member key <$> readIORef input.pressed
 isKeyReleased input key = Set.member key <$> readIORef input.released
 
+-- | In canvas pixels.
 getMousePosition :: Input -> IO (V2 Float)
 getMousePosition input = readIORef input.mouse

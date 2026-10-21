@@ -4,14 +4,15 @@
 
 module Main where
 
-import Canvas
 import Control.Lens hiding (Context, universe)
 import GHC.Wasm.Prim (JSString, toJSString)
-import Input
 import Linear
-import Physics (BodyId, BodyType (..), ShapeId, WorldId)
-import Physics qualified
 import Relude
+import Web.Box2D (BodyId, BodyType (..), ShapeId, WorldId)
+import Web.Box2D qualified as Physics
+import Web.Canvas
+import Web.Frame
+import Web.Input
 
 fi :: forall a b. (Integral a, Num b) => a -> b
 fi = fromIntegral
@@ -132,13 +133,6 @@ mainLoop ctx input dt world = do
   fillText ctx black 18 (V2 30 40) "Basic canvas window"
 
   pure world
-
-foreign import javascript safe "new Promise(requestAnimationFrame)"
-  js_nextFrame :: IO Double
-
--- | Waits for the browser's next frame and returns its timestamp in seconds.
-nextFrame :: IO Double
-nextFrame = (/ 1000) <$> (evaluateWHNF =<< js_nextFrame)
 
 -- | Called from web/index.html once the wasm module is loaded.
 main :: IO ()
