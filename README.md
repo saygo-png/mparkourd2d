@@ -91,6 +91,9 @@ The shell also has `wasm32-wasi-cabal`, for building the wasm by hand
 - `nix/package.nix` takes the built `.wasm` and generates `ghc_wasm_jsffi.js`
   with GHC's post-linker; this is the JS half of the Haskell↔JS calls. It puts
   both next to `index.html` and the JS libraries.
+- `nix/serve.hs` is the server `nix run` starts: Warp serving the site with
+  caching turned off. Everything in the Nix store is dated 1970, so a browser
+  that caches the files never notices a new build.
 - Every external piece is a flake input: nixpkgs (and with it the Haskell
   dependencies), ghc-wasm-meta, miso, box2d3-wasm and browser_wasi_shim (which
   gives the wasm module stdout/stderr in the console). `nix flake update`

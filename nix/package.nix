@@ -2,27 +2,28 @@
 # wasmHaskellPackages must contain mparkour2d (see flake.nix).
 # `bin/mparkour2d` serves it on localhost.
 {
-  lib,
   runCommand,
   makeWrapper,
+  writers,
+  haskellPackages,
   nodejs,
-  python3,
   wasmHaskellPackages,
   box2d3-wasm,
   browser-wasi-shim,
-}:
-runCommand "mparkour2d" {
-  nativeBuildInputs = [wasmHaskellPackages.ghc nodejs makeWrapper];
-  meta.mainProgram = "mparkour2d";
-} ''
-  site=$out/share/mparkour2d
-  mkdir -p $site/vendor/box2d3-wasm $site/vendor/browser_wasi_shim
-  cp ${../web/index.html} $site/index.html
-  cp ${wasmHaskellPackages.mparkour2d}/bin/mparkour2d.wasm $site
-  # Generates the JS half of the `foreign import javascript`s (miso's and the game's).
-  "$(wasm32-wasi-ghc --print-libdir)/post-link.mjs" -i $site/mparkour2d.wasm -o $site/ghc_wasm_jsffi.js
-  cp ${box2d3-wasm}/build/dist/es/compat/*.{mjs,wasm} $site/vendor/box2d3-wasm
-  cp ${browser-wasi-shim}/dist/*.js $site/vendor/browser_wasi_shim
-  makeWrapper ${lib.getExe python3} $out/bin/mparkour2d \
-    --add-flags "-m http.server --bind 127.0.0.1 --directory $site"
-''
+}: let
+  serve = writers.writeHaskellBin "serve" {libraries = [haskellPackages.wai-app-static haskellPackages.warp];} ./serve.hs;
+in
+  runCommand "mparkour2d" {
+    nativeBuildInputs = [wasmHaskellPackages.ghc nodejs makeWrapper];
+    meta.mainProgram = "mparkour2d";
+  } ''
+    site=$out/share/mparkour2d
+    mkdir -p $site/vendor/box2d3-wasm $site/vendor/browser_wasi_shim
+    cp ${../web/index.html} $site/index.html
+    cp ${wasmHaskellPackages.mparkour2d}/bin/mparkour2d.wasm $site
+    # Generates the JS half of the `foreign import javascript`s (miso's and the game's).
+    "$(wasm32-wasi-ghc --print-libdir)/post-link.mjs" -i $site/mparkour2d.wasm -o $site/ghc_wasm_jsffi.js
+    cp ${box2d3-wasm}/build/dist/es/compat/*.{mjs,wasm} $site/vendor/box2d3-wasm
+    cp ${browser-wasi-shim}/dist/*.js $site/vendor/browser_wasi_shim
+    makeWrapper ${serve}/bin/serve $out/bin/mparkour2d --add-flags $site
+  ''
