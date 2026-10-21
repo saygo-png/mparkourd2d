@@ -93,8 +93,8 @@ timeScale = 10
 
 gaLockonRange, gaCooldownTime, gaDashSpeed, gaArrivalThreshold, gaArrivedDuration, gaJumpSpeed :: Double
 gaLockonRange = 100 -- The pink circle around the mouse.
-gaCooldownTime = 3
-gaDashSpeed = 700 -- Pixels per second.
+gaCooldownTime = 1.5
+gaDashSpeed = 1000 -- Pixels per second.
 gaArrivalThreshold = 40
 gaArrivedDuration = 0.3
 gaJumpSpeed = 2000 -- Pixels per second.
@@ -128,7 +128,7 @@ initialModel =
     }
 
 gaTargets :: [V2 Double]
-gaTargets = liftA2 V2 (coord 8 (-2000)) (coord 50 300)
+gaTargets = liftA2 V2 (coord 60 (-2000)) (coord 50 300)
   where
     coord n start = map ((start +) . (* 400)) [0 .. n - 1]
 
@@ -158,7 +158,7 @@ startup = do
   _ <- Box2D.createSegment ground (v2 (-999) 1000) (v2 999 1000)
   body <- Box2D.createBody world' Box2D.DynamicBody (flipY playerOrigin)
   shape <- Box2D.createCircle body (v2 0 0) 10
-  Box2D.setRestitution shape 0.8
+  Box2D.setRestitution shape 0.4
   pure (Physics world' body)
 
 -- | Sets the player's velocity, in pixels per second on the screen.
@@ -174,7 +174,7 @@ applyAction p action = do
     MoveLeft -> push (v2 (-3000) 0)
     MoveRight -> push (v2 3000 0)
     Jump
-      | ready -> push (v2 0 (-9000))
+      | ready -> push (v2 0 (-4000))
       -- Jumping out of the GA launches the player towards the mouse.
       | otherwise -> do
           sync_ (setVelocity p (gaJumpSpeed *^ normalize (mouseWorld model - model ^. playerPosition)))
@@ -230,7 +230,7 @@ view model =
     , height_ (ms screenHeight)
     , on "pointermove" canvasPointer (\position _ _ -> MouseMoved position)
     ]
-    (\_ -> pass)
+    (const pass)
     (\() -> draw model)
 
 draw :: Model -> Canvas ()
