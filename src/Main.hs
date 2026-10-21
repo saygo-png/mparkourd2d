@@ -9,11 +9,10 @@ import Control.Lens hiding (universe, view, (#))
 import Data.IntSet qualified as IntSet
 import Data.Map qualified as Map
 import Linear (R2 (_y), V2 (..), distance, normalize, (*^), (^*), (^/))
-import Miso (App, Attribute, Component (mount, subs), DecodeTarget (..), Decoder (..), Effect, Phase (BUBBLE), View, component, defaultEvents, io, noop, on, startApp, sync, sync_, (+>))
+import Miso (App, Component (mount, subs), DecodeTarget (..), Decoder (..), Effect, Phase (BUBBLE), View, component, defaultEvents, io, on, startApp, sync, sync_)
 import Miso.CSS.Color (Color, rgb)
 import Miso.Canvas (Canvas)
 import Miso.Canvas qualified as Canvas
-import Miso.Html.Element (div_)
 import Miso.Html.Property (height_, width_)
 import Miso.JSON (withArray, withObject, (.:))
 import Miso.String (ms)
@@ -103,6 +102,9 @@ gaJumpSpeed = 2000 -- Pixels per second.
 playerOrigin :: V2 Double
 playerOrigin = V2 585 500
 
+screenCenter :: V2 Double
+screenCenter = V2 (screenWidth / 2) (screenHeight / 2)
+
 gray, pink, red, green, brown, darkBrown, black :: Color
 gray = rgb 130 130 130
 pink = rgb 255 109 194
@@ -130,6 +132,15 @@ gaTargets = liftA2 V2 (coord 8 (-2000)) (coord 50 300)
   where
     coord n start = map ((start +) . (* 400)) [0 .. n - 1]
 
+-- | The camera keeps the player in the middle of the screen.
+worldToScreen, screenToWorld :: Model -> V2 Double -> V2 Double
+worldToScreen model p = p - model ^. playerPosition + screenCenter
+screenToWorld model p = p + model ^. playerPosition - screenCenter
+
+-- | The mouse's position in the world.
+mouseWorld :: Model -> V2 Double
+mouseWorld model = screenToWorld model (model ^. mousePosition)
+
 -- | The target the GA would dash to: the one nearest the mouse, if it's in range.
 gaTarget :: Model -> Maybe (V2 Double)
 gaTarget model =
@@ -138,7 +149,7 @@ gaTarget model =
     & sortOn (distance mouse)
     & viaNonEmpty head
   where
-    mouse = model ^. mousePosition
+    mouse = mouseWorld model
 
 startup :: IO Physics
 startup = do
@@ -166,7 +177,7 @@ applyAction p action = do
       | ready -> push (v2 0 (-9000))
       -- Jumping out of the GA launches the player towards the mouse.
       | otherwise -> do
-          sync_ (setVelocity p (gaJumpSpeed *^ normalize (model ^. mousePosition - model ^. playerPosition)))
+          sync_ (setVelocity p (gaJumpSpeed *^ normalize (mouseWorld model - model ^. playerPosition)))
           gaPhase .= GaReady
     GetPos -> sync_ (print (model ^. mousePosition))
     GaStart -> case gaTarget model of
@@ -212,48 +223,43 @@ update = \case
       GaDashing target | distance position target <= gaArrivalThreshold -> GaArrived gaArrivedDuration
       phase -> phase
 
-{- | Canvases stacked on top of each other (see web/index.html). The scenery
-never changes, so it is its own component, which miso draws only once; the
-layers below and above it are redrawn every frame.
--}
 view :: Model -> View () () Model Msg
 view model =
-  div_
-    []
-    [ layer [] (drawBelow model)
-    , "scenery" +> scenery
-    , layer [on "pointermove" canvasPointer (\position _ _ -> MouseMoved position)] (drawAbove model)
+  Canvas.canvas
+    [ width_ (ms screenWidth)
+    , height_ (ms screenHeight)
+    , on "pointermove" canvasPointer (\position _ _ -> MouseMoved position)
     ]
+    (\_ -> pass)
+    (\() -> draw model)
 
-scenery :: Component () () () ()
-scenery = component () noop (\() -> layer [] drawScenery)
-
-layer :: [Attribute model action] -> Canvas () -> View context props model action
-layer attributes draw = Canvas.canvas (width_ (ms screenWidth) : height_ (ms screenHeight) : attributes) (\_ -> pass) (\() -> draw)
-
-drawBelow :: Model -> Canvas ()
-drawBelow model = do
+draw :: Model -> Canvas ()
+draw model = do
   fillRect gray (V2 0 0) (V2 screenWidth screenHeight)
   fillCircle pink (model ^. mousePosition) gaLockonRange
+  Canvas.save ()
+  let V2 x y = worldToScreen model (V2 0 0) in Canvas.translate (x, y)
+  drawWorld model
+  Canvas.restore ()
+  fillText black 20 (V2 20 20) ("Player height: " <> show (round (negate (model ^. playerPosition . _y)) :: Int))
+  fillText black 20 (V2 20 50) (gaStatus model)
+  fillTextRight black 20 (V2 (screenWidth - 20) 20) ("FPS: " <> show (round (model ^. fps) :: Int))
 
-drawScenery :: Canvas ()
-drawScenery = do
+-- | Everything that moves with the camera, in world coordinates.
+drawWorld :: Model -> Canvas ()
+drawWorld model = do
+  let ppos = model ^. playerPosition
+      -- Each canvas call costs a few JS values, so only the targets on the
+      -- screen are drawn.
+      onScreen target = let V2 dx dy = abs (target - ppos) in dx < screenWidth / 2 + 10 && dy < screenHeight / 2 + 10
   fillCircle red playerOrigin 30
   fillRect black (V2 (screenWidth / 2) (screenHeight / 2)) (V2 200 200)
-  for_ gaTargets $ \target -> fillCircle brown target 10
+  for_ (filter onScreen gaTargets) $ \target -> fillCircle brown target 10
+  for_ (gaTarget model) $ \target -> strokeLine darkBrown 4 (mouseWorld model) target
   strokeLine black 4 (V2 (-999) 1000) (V2 999 1000)
-  fillText black 18 (V2 30 40) "Basic canvas window"
-
-drawAbove :: Model -> Canvas ()
-drawAbove model = do
-  let ppos = model ^. playerPosition
-  Canvas.clearRect (0, 0, screenWidth, screenHeight)
-  fillText black 20 (V2 20 20) ("Player height: " <> show (round (negate (ppos ^. _y)) :: Int))
-  fillText black 20 (V2 20 65) (gaStatus model)
-  fillTextRight black 20 (V2 (screenWidth - 20) 20) ("FPS: " <> show (round (model ^. fps) :: Int))
-  for_ (gaTarget model) $ \target -> strokeLine darkBrown 4 (model ^. mousePosition) target
   fillCircle green ppos 10
   fillText black 20 (ppos - V2 17 20) "PLAYER"
+  fillText black 18 (V2 30 40) "Basic canvas window"
 
 gaStatus :: Model -> Text
 gaStatus model = case model ^. gaPhase of

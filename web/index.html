@@ -5,14 +5,12 @@
     <title>mparkour2d</title>
     <style>
       body { margin: 0; height: 100vh; display: grid; place-items: center; overflow: hidden; background: #000; }
-      /* The game's canvases, stacked. */
-      body > div { display: grid; }
-      canvas { grid-area: 1 / 1; width: min(100vw, calc(100vh * 16 / 9)); }
+      canvas { width: min(100vw, calc(100vh * 16 / 9)); }
     </style>
   </head>
   <body>
     <script type="module">
-      // The game draws on the canvases miso adds to <body>, and uses Box2D through
+      // The game draws on the canvas miso adds to <body>, and uses Box2D through
       // the global `b2` (see src/Box2D.hs).
       import box2d from "./vendor/box2d3-wasm/Box2D.compat.mjs";
       import { WASI, OpenFile, File, ConsoleStdout } from "./vendor/browser_wasi_shim/index.js";

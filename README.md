@@ -18,21 +18,24 @@ cooldown, and `Space` during it jumps out towards the mouse.
 
 | Path | What it is |
 | --- | --- |
-| `src/Main.hs` | The game, as a miso app: a `Model`, the `Msg`s that change it, `update`, and a `view` that draws the model on canvases. |
+| `src/Main.hs` | The game, as a miso app: a `Model`, the `Msg`s that change it, `update`, and a `view` that draws the model on a canvas. |
 | `src/Box2D.hs` | The Box2D functions the game uses, each a few lines of JS. |
 | `web/index.html` | Loads Box2D and the wasm module, then calls `start` (the game's `main`). |
 
 Each frame miso sends `Frame time` (from `rAFSub`). `update` then pushes the
 player according to the held keys (from `keyboardSub`), steps the physics world,
-and stores the player's new position. miso redraws the canvases from the new
+and stores the player's new position. miso redraws the canvas from the new
 model with `view`.
 
+The camera keeps the player in the middle of the screen. Positions in the model
+are world positions, except the mouse's, which is on the screen;
+`screenToWorld` and `worldToScreen` convert between them. `drawWorld` draws in
+world positions (the canvas is translated for it), and the text around it is
+drawn on the screen.
+
 Each `Miso.Canvas` call costs a few JS values, so drawing hundreds of shapes
-every frame is slow. The view is three stacked canvases instead: the scenery,
-which never changes, is its own component, so miso draws it once; only the
-layers below it (background, mouse) and above it (player, text) are redrawn each
-frame. Put new static things in `drawScenery`, and moving ones in the other
-layers.
+every frame is slow: draw only what is on the screen, as `drawWorld` does with
+the targets.
 
 Box2D is [box2d3-wasm](https://github.com/Birch-san/box2d3-wasm), Box2D v3
 compiled to wasm by Emscripten. It is a separate wasm module, so the game uses
